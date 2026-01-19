@@ -99,27 +99,27 @@ withr::with_preserve_seed({
 
 ## load the ages data.frame
 ages <- read_excel("data/time_collection_blood_LLNEXT.xlsx",
-                   col_types = c(
-                     "text", "text", "text",
-                     "text", "text", "numeric", "text",
-                     "text", "text", "text", "text", "numeric",
-                     "text", "numeric", "numeric", "numeric"
-                   )
+  col_types = c(
+    "text", "text", "text",
+    "text", "text", "numeric", "text",
+    "text", "text", "text", "text", "numeric",
+    "text", "numeric", "numeric", "numeric"
+  )
 )
 
 ages$next_id <- gsub("LLNEXT", "", ages$next_id, fixed = TRUE)
 
 ## Converting TIMEPOINTS to factors
 ages$timepoint_factor <- dplyr::recode_factor(ages$timepoint,
-                                              "P12" = "T0",
-                                              "P28" = "T1",
-                                              "B" = "T2",
-                                              "W2" = "T3",
-                                              "M1" = "T4",
-                                              "M2" = "T5",
-                                              "M3" = "T6",
-                                              "M6" = "T7",
-                                              "M12" = "T8"
+  "P12" = "T0",
+  "P28" = "T1",
+  "B" = "T2",
+  "W2" = "T3",
+  "M1" = "T4",
+  "M2" = "T5",
+  "M3" = "T6",
+  "M6" = "T7",
+  "M12" = "T8"
 )
 
 ## NOTE: after i performed the standardization, there were some observations
@@ -141,11 +141,11 @@ ages$timepoint_factor <- dplyr::recode_factor(ages$timepoint,
 
 ages$exact_age[ages$next_id == "010577" & ages$timepoint == "B"] <- 0
 ages$exact_age[ages$next_id == "008101" &
-                 ages$timepoint == "M12"] <- 122.3229167 + 9 * 30
+  ages$timepoint == "M12"] <- 122.3229167 + 9 * 30
 ages$exact_age[ages$next_id == "008525" &
-                 ages$timepoint == "B"] <- 11148.52 + 22 * 7
+  ages$timepoint == "B"] <- 11148.52 + 22 * 7
 ages$exact_age[ages$next_id == "206131" &
-                 ages$timepoint == "B"] <- 13839.48 + 22 * 7
+  ages$timepoint == "B"] <- 13839.48 + 22 * 7
 
 ## ----- standardizing the ages to days_since_birth on a common scale ----------
 ## calculating the mom age at birth
@@ -158,8 +158,8 @@ mom_birth_age <- ages %>%
   ) %>%
   slice(1) %>%
   transmute(next_id,
-            mom_minimal_age = exact_age,
-            timepoint
+    mom_minimal_age = exact_age,
+    timepoint
   ) %>%
   ungroup()
 
@@ -179,12 +179,12 @@ mom_birth_age <- mom_birth_age %>%
 ## merge the data with the ages
 withr::with_preserve_seed({
   ps_merged <- left_join(ps,
-                         ages[, c("next_id", "timepoint_factor", "exact_age")],
-                         by = dplyr::join_by(
-                           subject_id == next_id,
-                           timepoint_factor == timepoint_factor
-                         ),
-                         copy = TRUE
+    ages[, c("next_id", "timepoint_factor", "exact_age")],
+    by = dplyr::join_by(
+      subject_id == next_id,
+      timepoint_factor == timepoint_factor
+    ),
+    copy = TRUE
   )
 })
 
@@ -198,8 +198,8 @@ ps_merged %<>% dplyr::select(
 ## adding mom_birth_age
 withr::with_seed(1653, {
   ps_merged <- left_join(ps_merged, mom_birth_age,
-                         by = dplyr::join_by(subject_id == next_id),
-                         copy = TRUE
+    by = dplyr::join_by(subject_id == next_id),
+    copy = TRUE
   )
 })
 
@@ -298,8 +298,10 @@ metas %<>% select(
 ## table with multiple timepoints per subject. We now have to pivot them to wide
 id_col <- "next_id_infant"
 time_col <- "Timepoint_categorical"
-pivot_cols <- c("infant_ffq_feeding_mode_simple",
-                "infant_ffq_feeding_mode_complex")
+pivot_cols <- c(
+  "infant_ffq_feeding_mode_simple",
+  "infant_ffq_feeding_mode_complex"
+)
 
 # pivot timepoint feeding cols wide
 time_wide <- metas %>%
@@ -316,35 +318,59 @@ time_wide <- metas %>%
 ## when M1 or M3 present, then leave it, when not present, then try to fill with
 ## W2 or M2 respectively; at the end remove the redundant cols
 # --- fill M1 from W2 when M1 is missing ---
-if (all(c("infant_ffq_feeding_mode_simple_W2",
-          "infant_ffq_feeding_mode_simple_M1") %in% names(time_wide))) {
+if (all(c(
+  "infant_ffq_feeding_mode_simple_W2",
+  "infant_ffq_feeding_mode_simple_M1"
+) %in% names(time_wide))) {
   time_wide <- time_wide %>%
-    mutate(infant_ffq_feeding_mode_simple_M1 =
-             coalesce(infant_ffq_feeding_mode_simple_M1,
-                      infant_ffq_feeding_mode_simple_W2))
+    mutate(
+      infant_ffq_feeding_mode_simple_M1 =
+        coalesce(
+          infant_ffq_feeding_mode_simple_M1,
+          infant_ffq_feeding_mode_simple_W2
+        )
+    )
 }
-if (all(c("infant_ffq_feeding_mode_complex_W2",
-          "infant_ffq_feeding_mode_complex_M1") %in% names(time_wide))) {
+if (all(c(
+  "infant_ffq_feeding_mode_complex_W2",
+  "infant_ffq_feeding_mode_complex_M1"
+) %in% names(time_wide))) {
   time_wide <- time_wide %>%
-    mutate(infant_ffq_feeding_mode_complex_M1 =
-             coalesce(infant_ffq_feeding_mode_complex_M1,
-                      infant_ffq_feeding_mode_complex_W2))
+    mutate(
+      infant_ffq_feeding_mode_complex_M1 =
+        coalesce(
+          infant_ffq_feeding_mode_complex_M1,
+          infant_ffq_feeding_mode_complex_W2
+        )
+    )
 }
 
 # --- fill M3 from M2 when M3 is missing ---
-if (all(c("infant_ffq_feeding_mode_simple_M2",
-          "infant_ffq_feeding_mode_simple_M3") %in% names(time_wide))) {
+if (all(c(
+  "infant_ffq_feeding_mode_simple_M2",
+  "infant_ffq_feeding_mode_simple_M3"
+) %in% names(time_wide))) {
   time_wide <- time_wide %>%
-    mutate(infant_ffq_feeding_mode_simple_M3 =
-             coalesce(infant_ffq_feeding_mode_simple_M3,
-                      infant_ffq_feeding_mode_simple_M2))
+    mutate(
+      infant_ffq_feeding_mode_simple_M3 =
+        coalesce(
+          infant_ffq_feeding_mode_simple_M3,
+          infant_ffq_feeding_mode_simple_M2
+        )
+    )
 }
-if (all(c("infant_ffq_feeding_mode_complex_M2",
-          "infant_ffq_feeding_mode_complex_M3") %in% names(time_wide))) {
+if (all(c(
+  "infant_ffq_feeding_mode_complex_M2",
+  "infant_ffq_feeding_mode_complex_M3"
+) %in% names(time_wide))) {
   time_wide <- time_wide %>%
-    mutate(infant_ffq_feeding_mode_complex_M3 =
-             coalesce(infant_ffq_feeding_mode_complex_M3,
-                      infant_ffq_feeding_mode_complex_M2))
+    mutate(
+      infant_ffq_feeding_mode_complex_M3 =
+        coalesce(
+          infant_ffq_feeding_mode_complex_M3,
+          infant_ffq_feeding_mode_complex_M2
+        )
+    )
 }
 
 # --- drop the source columns (W2 and M2), if present ---
@@ -389,16 +415,16 @@ metas <- other %>%
   ) %>%
   dplyr::mutate(
     parity_num = as.numeric(dplyr::na_if(trimws(parity), "NA")),
-    ga_weeks   = as.numeric(dplyr::na_if(trimws(gestage_birth_weeks), "NA")),
-    siblings   = dplyr::case_when(
-      !is.na(parity_num) & parity_num > 0 ~ "yes",   # per your rule: >1
-      !is.na(parity_num)                  ~ "no",
-      TRUE                                ~ NA_character_
+    ga_weeks = as.numeric(dplyr::na_if(trimws(gestage_birth_weeks), "NA")),
+    siblings = dplyr::case_when(
+      !is.na(parity_num) & parity_num > 0 ~ "yes", # per your rule: >1
+      !is.na(parity_num) ~ "no",
+      TRUE ~ NA_character_
     ),
-    preterm    = dplyr::case_when(
+    preterm = dplyr::case_when(
       !is.na(ga_weeks) & ga_weeks < 37 ~ "yes",
-      !is.na(ga_weeks)                 ~ "no",
-      TRUE                             ~ NA_character_
+      !is.na(ga_weeks) ~ "no",
+      TRUE ~ NA_character_
     )
   ) %>%
   dplyr::select(-parity_num, -ga_weeks)
@@ -417,7 +443,7 @@ metas <- metas %>%
 
 # cd risk, getting rid of the LLNEXT prefix and merging RiskCD
 cd <- read_excel("data/CD_risk_share.xlsx")
-cd$LLNEXTsample.id <- str_sub(cd$LLNEXTsample.id , 7)
+cd$LLNEXTsample.id <- str_sub(cd$LLNEXTsample.id, 7)
 colnames(cd)[1] <- "id_infant"
 
 metas <- metas %>%
@@ -478,14 +504,14 @@ metas <- metas %>%
   mutate(
     feedmode_m3_clean = feedmode_m3 %>%
       str_squish() %>% str_to_upper() %>% na_if(""),
-
     feedmode_m3_bin = case_when(
       is.na(feedmode_m3_clean) ~ NA_character_,
       feedmode_m3_clean %in% c("BF", "OTHERWISE_NAMELY:") ~ "BF",
       feedmode_m3_clean %in% c("FF", "FF/BF") ~ "MF+FF",
       TRUE ~ "MF+FF"
-    )) %>%
-  select(-feedmode_m3_clean)  # drop helper
+    )
+  ) %>%
+  select(-feedmode_m3_clean) # drop helper
 
 ## ------------------- BINARIZING METADATA -------------------------------------
 ## converting the metadata to binary dummies
@@ -561,8 +587,8 @@ gc()
 # long format is necessary for plotting/GLMMs and many other analyses
 # expand and tag existence
 ps_merged_meta_bin <- expand_phip_data(ps_merged_meta,
-                                       add_exist = TRUE,
-                                       exist_col = "exist"
+  add_exist = TRUE,
+  exist_col = "exist"
 )
 
 # then some cosmetics: add new column for the timepoints of breast milk, we
@@ -622,8 +648,10 @@ pair_allocs <- lapply(seq_along(pairs_list), function(i) {
 mapping <- bind_rows(pair_allocs)
 
 # --- write mapping to DB temporary table ---
-DBI::dbWriteTable(con, "tmp_pairs_dyade_map", mapping, temporary = TRUE,
-                  overwrite = TRUE)
+DBI::dbWriteTable(con, "tmp_pairs_dyade_map", mapping,
+  temporary = TRUE,
+  overwrite = TRUE
+)
 
 # --- build lazy recoded table and materialize it ---
 # create a new table with timepoint_recoded (same rules) and dyade_recoded
@@ -658,8 +686,10 @@ to_keep <- orig_tbl
 to_drop <- setdiff(all_tables, to_keep)
 if (length(to_drop) > 0) {
   for (t in to_drop) {
-    DBI::dbExecute(con, paste0("DROP TABLE IF EXISTS ",
-                               DBI::dbQuoteIdentifier(con, t)))
+    DBI::dbExecute(con, paste0(
+      "DROP TABLE IF EXISTS ",
+      DBI::dbQuoteIdentifier(con, t)
+    ))
   }
 }
 
@@ -679,53 +709,42 @@ core_cols <- c(
 comparisons <- list(
   c("mom_serum_T0", "mom_serum_T1"),
   c("mom_serum_T0", "mom_serum_T2"),
-  #c("mom_serum_T1", "mom_serum_T2"),
+  # c("mom_serum_T1", "mom_serum_T2"),
 
   c("mom_serum_T2", "kid_serum_T2"),
   c("kid_serum_T2", "kid_serum_T6"),
   c("kid_serum_T2", "kid_serum_T8"),
   c("kid_serum_T6", "kid_serum_T8"),
   c("kid_serum_T2", "kid_serum_T8"),
-
   c("mom_milk_T4", "mom_milk_T6"),
   c("mom_milk_T4", "mom_milk_T7"),
   c("mom_milk_T4", "mom_milk_T8"),
-
   c("kid_serum_T6", "mom_milk_T6"),
   c("kid_serum_T8", "mom_milk_T8"),
-
   c("kid_serum_T2_siblings", "kid_serum_T2_no_siblings"),
   c("kid_serum_T6_siblings", "kid_serum_T6_no_siblings"),
   c("kid_serum_T8_siblings", "kid_serum_T8_no_siblings"),
-
   c("kid_serum_T2_delmode_VG", "kid_serum_T2_delmode_CS"),
   c("kid_serum_T6_delmode_VG", "kid_serum_T6_delmode_CS"),
   c("kid_serum_T8_delmode_VG", "kid_serum_T8_delmode_CS"),
-
   c("kid_serum_T2_delplace_home", "kid_serum_T2_delplace_hospital"),
   c("kid_serum_T6_delplace_home", "kid_serum_T6_delplace_hospital"),
   c("kid_serum_T8_delplace_home", "kid_serum_T8_delplace_hospital"),
-
   c("kid_serum_T2_feeding_BF", "kid_serum_T2_feeding_MF"),
   c("kid_serum_T6_feeding_BF", "kid_serum_T6_feeding_MF"),
   c("kid_serum_T8_feeding_BF", "kid_serum_T8_feeding_MF"),
-
   c("kid_serum_T2_preterm_yes", "kid_serum_T2_preterm_no"),
   c("kid_serum_T6_preterm_yes", "kid_serum_T6_preterm_no"),
   c("kid_serum_T8_preterm_yes", "kid_serum_T8_preterm_no"),
-
   c("kid_serum_T2_CDrisk_yes", "kid_serum_T2_CDrisk_no"),
   c("kid_serum_T6_CDrisk_yes", "kid_serum_T6_CDrisk_no"),
   c("kid_serum_T8_CDrisk_yes", "kid_serum_T8_CDrisk_no"),
-
   c("kid_serum_T2_lockdown_before", "kid_serum_T2_lockdown_after"),
   c("kid_serum_T6_lockdown_before", "kid_serum_T6_lockdown_after"),
   c("kid_serum_T8_lockdown_before", "kid_serum_T8_lockdown_after"),
-
   c("kid_serum_T2_smoking_yes", "kid_serum_T2_smoking_no"),
   c("kid_serum_T6_smoking_yes", "kid_serum_T6_smoking_no"),
   c("kid_serum_T8_smoking_yes", "kid_serum_T8_smoking_no"),
-
   c("kid_serum_T2_sex_male", "kid_serum_T2_sex_female"),
   c("kid_serum_T6_sex_male", "kid_serum_T6_sex_female"),
   c("kid_serum_T8_sex_male", "kid_serum_T8_sex_female")

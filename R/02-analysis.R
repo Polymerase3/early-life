@@ -19,7 +19,8 @@ args <- commandArgs(trailingOnly = TRUE)
 for (arg in args) {
   if (grepl("=", arg)) {
     parts <- strsplit(arg, "=")[[1]]
-    key <- parts[1]; value <- parts[2]
+    key <- parts[1]
+    value <- parts[2]
     if (key == "N_CORES") {
       val_num <- suppressWarnings(as.numeric(value))
       if (!is.na(val_num)) N_CORES <- val_num
@@ -67,53 +68,42 @@ get_peptide_library(ps) %>%
 comparisons <- list(
   c("mom_serum_T0", "mom_serum_T1"),
   c("mom_serum_T0", "mom_serum_T2"),
-  #c("mom_serum_T1", "mom_serum_T2"),
+  # c("mom_serum_T1", "mom_serum_T2"),
 
   c("mom_serum_T2", "kid_serum_T2"),
   c("kid_serum_T2", "kid_serum_T6"),
   c("kid_serum_T2", "kid_serum_T8"),
   c("kid_serum_T6", "kid_serum_T8"),
   c("kid_serum_T2", "kid_serum_T8"),
-
   c("mom_milk_T4", "mom_milk_T6"),
   c("mom_milk_T4", "mom_milk_T7"),
   c("mom_milk_T4", "mom_milk_T8"),
-
   c("kid_serum_T6", "mom_milk_T6"),
   c("kid_serum_T8", "mom_milk_T8"),
-
   c("kid_serum_T2_siblings", "kid_serum_T2_no_siblings"),
   c("kid_serum_T6_siblings", "kid_serum_T6_no_siblings"),
   c("kid_serum_T8_siblings", "kid_serum_T8_no_siblings"),
-
   c("kid_serum_T2_delmode_VG", "kid_serum_T2_delmode_CS"),
   c("kid_serum_T6_delmode_VG", "kid_serum_T6_delmode_CS"),
   c("kid_serum_T8_delmode_VG", "kid_serum_T8_delmode_CS"),
-
   c("kid_serum_T2_delplace_home", "kid_serum_T2_delplace_hospital"),
   c("kid_serum_T6_delplace_home", "kid_serum_T6_delplace_hospital"),
   c("kid_serum_T8_delplace_home", "kid_serum_T8_delplace_hospital"),
-
   c("kid_serum_T2_feeding_BF", "kid_serum_T2_feeding_MF"),
   c("kid_serum_T6_feeding_BF", "kid_serum_T6_feeding_MF"),
   c("kid_serum_T8_feeding_BF", "kid_serum_T8_feeding_MF"),
-
   c("kid_serum_T2_preterm_yes", "kid_serum_T2_preterm_no"),
   c("kid_serum_T6_preterm_yes", "kid_serum_T6_preterm_no"),
   c("kid_serum_T8_preterm_yes", "kid_serum_T8_preterm_no"),
-
   c("kid_serum_T2_CDrisk_yes", "kid_serum_T2_CDrisk_no"),
   c("kid_serum_T6_CDrisk_yes", "kid_serum_T6_CDrisk_no"),
   c("kid_serum_T8_CDrisk_yes", "kid_serum_T8_CDrisk_no"),
-
   c("kid_serum_T2_lockdown_before", "kid_serum_T2_lockdown_after"),
   c("kid_serum_T6_lockdown_before", "kid_serum_T6_lockdown_after"),
   c("kid_serum_T8_lockdown_before", "kid_serum_T8_lockdown_after"),
-
   c("kid_serum_T2_smoking_yes", "kid_serum_T2_smoking_no"),
   c("kid_serum_T6_smoking_yes", "kid_serum_T6_smoking_no"),
   c("kid_serum_T8_smoking_yes", "kid_serum_T8_smoking_no"),
-
   c("kid_serum_T2_sex_male", "kid_serum_T2_sex_female"),
   c("kid_serum_T6_sex_male", "kid_serum_T6_sex_female"),
   c("kid_serum_T8_sex_male", "kid_serum_T8_sex_female")
@@ -172,8 +162,11 @@ original_plan <- future::plan()
 if (.Platform$OS.type == "windows") {
   future::plan(future::multisession, workers = N_CORES)
 } else {
-  if (N_CORES > 1L) future::plan(future::multicore, workers = N_CORES)
-  else future::plan(future::sequential)
+  if (N_CORES > 1L) {
+    future::plan(future::multicore, workers = N_CORES)
+  } else {
+    future::plan(future::sequential)
+  }
 }
 
 # loop through each comparison and perform the same analysis
@@ -215,8 +208,10 @@ for (cmp in comparisons) {
   )
 
   # ------------------ enrichment counts ------------------
-  CairoSVG(file.path(out_dir, "enrichment_counts.svg"), dpi = 300,
-           height = 30, width = 40, unit = "cm", bg = "white")
+  CairoSVG(file.path(out_dir, "enrichment_counts.svg"),
+    dpi = 300,
+    height = 30, width = 40, unit = "cm", bg = "white"
+  )
   p_enrich <- plot_enrichment_counts(ps_cmp, group_cols = "group_char") +
     theme(text = element_text(family = "DejaVu Sans"))
   print(p_enrich)
@@ -227,16 +222,20 @@ for (cmp in comparisons) {
   dir.create(file.path(out_dir, "alpha_diversity"), recursive = TRUE, showWarnings = FALSE)
   write.xlsx(alpha_div, file.path(out_dir, "alpha_diversity", "table.xlsx"))
 
-  CairoSVG(file.path(out_dir, "alpha_diversity", "plot.svg"), dpi = 300,
-           height = 30, width = 40, unit = "cm", bg = "white")
+  CairoSVG(file.path(out_dir, "alpha_diversity", "plot.svg"),
+    dpi = 300,
+    height = 30, width = 40, unit = "cm", bg = "white"
+  )
   p_alpha <- plot_alpha_diversity(alpha_div, metric = "richness", group_col = "group_char")
   print(p_alpha)
   dev.off()
 
   # ------------------ beta diversity ---------------------
-  dist_bc <- phiper:::compute_distance(ps_cmp, value_col = "exist",
-                                       method_normalization = "hellinger",
-                                       distance = "bray", n_threads = 10)
+  dist_bc <- phiper:::compute_distance(ps_cmp,
+    value_col = "exist",
+    method_normalization = "hellinger",
+    distance = "bray", n_threads = 10
+  )
   dir.create(file.path(out_dir, "beta_diversity"), recursive = TRUE, showWarnings = FALSE)
   dist_mat <- as.matrix(dist_bc)
   openxlsx::write.xlsx(dist_mat, file = file.path(out_dir, "beta_diversity", "distance_matrix.xlsx"), rowNames = TRUE)
@@ -244,7 +243,7 @@ for (cmp in comparisons) {
   pcoa_res <- phiper:::compute_pcoa(dist_bc, neg_correction = "none", n_axes = 109)
   saveRDS(pcoa_res, file.path(out_dir, "beta_diversity", "pcoa_results.rds"))
 
-  cap_res <- phiper:::compute_capscale(dist_bc, ps = ps_cmp, formula = ~ group_char)
+  cap_res <- phiper:::compute_capscale(dist_bc, ps = ps_cmp, formula = ~group_char)
   saveRDS(cap_res, file.path(out_dir, "beta_diversity", "capscale_results.rds"))
 
   permanova_res <- phiper:::compute_permanova(dist_bc, ps = ps_cmp, group_col = "group_char")
@@ -254,12 +253,16 @@ for (cmp in comparisons) {
   saveRDS(disp_res, file.path(out_dir, "beta_diversity", "dispersion_results.rds"))
   print(disp_res)
 
-  tsne_res <- phiper:::compute_tsne(ps = ps_cmp, dist_obj = dist_bc, dims = 2L,
-                                    perplexity = 15, meta_cols = c("group_char"))
+  tsne_res <- phiper:::compute_tsne(
+    ps = ps_cmp, dist_obj = dist_bc, dims = 2L,
+    perplexity = 15, meta_cols = c("group_char")
+  )
   openxlsx::write.xlsx(tsne_res, file = file.path(out_dir, "beta_diversity", "tsne2d_results.xlsx"), rowNames = TRUE)
 
-  CairoSVG(file.path(out_dir, "beta_diversity", "tsne2d_plot.svg"), dpi = 300,
-           height = 30, width = 30, unit = "cm", bg = "white")
+  CairoSVG(file.path(out_dir, "beta_diversity", "tsne2d_plot.svg"),
+    dpi = 300,
+    height = 30, width = 30, unit = "cm", bg = "white"
+  )
   p_tsne2d <- phiper:::plot_tsne(tsne_res, view = "2d", colour = "group_char", palette = c("blue", "green"))
   print(p_tsne2d)
   dev.off()
@@ -267,8 +270,10 @@ for (cmp in comparisons) {
   ps_cmp$data_long <- ps_cmp$data_long %>%
     mutate(sample_id = as.character(sample_id))
 
-  tsne_res <- phiper:::compute_tsne(ps = ps_cmp, dist_obj = dist_bc, dims = 3L,
-                                    perplexity = 20, meta_cols = c("group_char"))
+  tsne_res <- phiper:::compute_tsne(
+    ps = ps_cmp, dist_obj = dist_bc, dims = 3L,
+    perplexity = 20, meta_cols = c("group_char")
+  )
   openxlsx::write.xlsx(tsne_res, file = file.path(out_dir, "beta_diversity", "tsne3d_results.xlsx"), rowNames = TRUE)
 
   p3d <- phiper:::plot_tsne(tsne_res, view = "3d", colour = "group_char", palette = c("blue", "green"))
@@ -283,16 +288,22 @@ for (cmp in comparisons) {
     )
 
   # PCoA plot with group centroids and ellipses
-  CairoSVG(file.path(out_dir, "beta_diversity", "pcoa_plot.svg"), dpi = 300,
-           height = 30, width = 30, unit = "cm", bg = "white")
-  p_pcoa <- phiper:::plot_pcoa(pcoa_res, axes = c(1, 2), group_col = "group_char",
-                               ellipse_by = "group", show_centroids = TRUE)
+  CairoSVG(file.path(out_dir, "beta_diversity", "pcoa_plot.svg"),
+    dpi = 300,
+    height = 30, width = 30, unit = "cm", bg = "white"
+  )
+  p_pcoa <- phiper:::plot_pcoa(pcoa_res,
+    axes = c(1, 2), group_col = "group_char",
+    ellipse_by = "group", show_centroids = TRUE
+  )
   print(p_pcoa)
   dev.off()
 
   # scree plot for first 15 axes of PCoA
-  CairoSVG(file.path(out_dir, "beta_diversity", "scree_plot.svg"), dpi = 300,
-           height = 30, width = 30, unit = "cm", bg = "white")
+  CairoSVG(file.path(out_dir, "beta_diversity", "scree_plot.svg"),
+    dpi = 300,
+    height = 30, width = 30, unit = "cm", bg = "white"
+  )
   p_scree <- phiper:::plot_scree(pcoa_res, n_axes = 15, type = "line") + theme()
   print(p_scree)
   dev.off()
@@ -318,8 +329,10 @@ for (cmp in comparisons) {
     )
   }
 
-  CairoSVG(file.path(out_dir, "beta_diversity", "dispersion_plot.svg"), dpi = 300,
-           height = 30, width = 30, unit = "cm", bg = "white")
+  CairoSVG(file.path(out_dir, "beta_diversity", "dispersion_plot.svg"),
+    dpi = 300,
+    height = 30, width = 30, unit = "cm", bg = "white"
+  )
   p_disp <- phiper:::plot_dispersion(
     disp_res,
     scope        = "group",
@@ -396,32 +409,34 @@ for (cmp in comparisons) {
       rank_tbl %>% filter(rank == rank_chr)
     }
     p_static <- scatter_static(
-      df   = df_rank,
+      df = df_rank,
       rank = rank_chr,
       xlab = df_rank$group1[1],
       ylab = df_rank$group2[1],
-      point_size       = 2,
-      jitter_width_pp  = 0.15,
+      point_size = 2,
+      jitter_width_pp = 0.15,
       jitter_height_pp = 0.15,
-      point_alpha      = 0.85,
-      font_size        = 12
+      point_alpha = 0.85,
+      font_size = 12
     ) +
       ggplot2::coord_cartesian(xlim = c(-2, 102), ylim = c(-2, 102), expand = TRUE) +
       ggplot2::theme(
         plot.margin = grid::unit(c(12, 12, 12, 12), "pt"),
         text        = ggplot2::element_text(family = "Montserrat")
       )
-    ggsave(paste0(out_name, "_static.svg"), p_static, dpi = 300,
-           height = 30, width = 30, unit = "cm", bg = "white")
+    ggsave(paste0(out_name, "_static.svg"), p_static,
+      dpi = 300,
+      height = 30, width = 30, unit = "cm", bg = "white"
+    )
 
     p_inter <- scatter_interactive(
-      df   = df_rank,
+      df = df_rank,
       rank = rank_chr,
       xlab = df_rank$group1[1],
       ylab = df_rank$group2[1],
       peplib = peplib,
       point_size = 10,
-      jitter_width_pp  = 0.25,
+      jitter_width_pp = 0.25,
       jitter_height_pp = 0.25,
       point_alpha = 0.85,
       font_size = 12
@@ -453,33 +468,33 @@ for (cmp in comparisons) {
   }
 
   res <- phiper::compute_delta(
-    x                  = data_frameworks,
-    exist_col          = "exist",
-    rank_cols          = c(
+    x = data_frameworks,
+    exist_col = "exist",
+    rank_cols = c(
       "phylum", "class", "order", "family", "genus", "species",
       "is_auto", "is_infect", "is_EBV", "is_toxin", "is_PNP", "is_EM",
       "is_MPA", "is_patho", "is_probio", "is_IgA", "is_flagellum", "is_allergens"
     ),
-    group_cols         = "group_char",
-    peptide_library    = peplib,
-    B_permutations     = 150000L,
-    smooth_eps_num     = 0.5,
-    smooth_eps_den_mult= 2.0,
-    min_max_prev       = 0.0,
-    weight_mode        = "n_eff_sqrt",
-    stat_mode          = "asin",
-    prev_strat         = "none",
-    winsor_z           = Inf,
-    rank_feature_keep  = list(
-      phylum  = NULL, class = NULL, order = NULL, family = NULL, genus = NULL, species = NULL,
+    group_cols = "group_char",
+    peptide_library = peplib,
+    B_permutations = 150000L,
+    smooth_eps_num = 0.5,
+    smooth_eps_den_mult = 2.0,
+    min_max_prev = 0.0,
+    weight_mode = "n_eff_sqrt",
+    stat_mode = "asin",
+    prev_strat = "none",
+    winsor_z = Inf,
+    rank_feature_keep = list(
+      phylum = NULL, class = NULL, order = NULL, family = NULL, genus = NULL, species = NULL,
       is_auto = "TRUE", is_infect = "TRUE", is_EBV = "TRUE", is_toxin = "TRUE", is_PNP = "TRUE", is_EM = "TRUE",
-      is_MPA  = "TRUE", is_patho  = "TRUE", is_probio = "TRUE", is_IgA  = "TRUE", is_flagellum = "TRUE", is_allergens = "TRUE"
+      is_MPA = "TRUE", is_patho = "TRUE", is_probio = "TRUE", is_IgA = "TRUE", is_flagellum = "TRUE", is_allergens = "TRUE"
     ),
-    log                = LOG,
-    log_file           = log_file_current,
-    fold_change        = "sum",
-    cross_prev         = "mean",
-    paired_by          = paired_col
+    log = LOG,
+    log_file = log_file_current,
+    fold_change = "sum",
+    cross_prev = "mean",
+    paired_by = paired_col
   )
   res <- as.data.frame(res)
 
@@ -489,52 +504,56 @@ for (cmp in comparisons) {
   res$feature[!std_idx] <- as.character(res$rank[!std_idx])
   res$rank <- "all"
 
-  CairoSVG(file.path(out_dir, "DELTA_framework", "uncorrected_significant_static_forestplot.svg"), dpi = 300,
-           height = 30, width = 30, unit = "cm", bg = "white")
+  CairoSVG(file.path(out_dir, "DELTA_framework", "uncorrected_significant_static_forestplot.svg"),
+    dpi = 300,
+    height = 30, width = 30, unit = "cm", bg = "white"
+  )
   p_forest_unc <- phiper::forestplot(
-    results_tbl          = res,
-    rank_of_interest     = "all",
+    results_tbl = res,
+    rank_of_interest = "all",
     use_diverging_colors = TRUE,
-    filter_significant   = "p_perm",
-    left_label           = paste0("More in ", df_rank$group1[1]),
-    right_label          = paste0("More in ", df_rank$group2[1]),
-    label_vjust           = -0.9,
-    y_pad                 = 0.3,
-    label_x_gap_frac      = -0.3,
-    statistic_to_plot     = "T_stand"
+    filter_significant = "p_perm",
+    left_label = paste0("More in ", df_rank$group1[1]),
+    right_label = paste0("More in ", df_rank$group2[1]),
+    label_vjust = -0.9,
+    y_pad = 0.3,
+    label_x_gap_frac = -0.3,
+    statistic_to_plot = "T_stand"
   )
   print(p_forest_unc)
   dev.off()
 
-  CairoSVG(file.path(out_dir, "DELTA_framework", "BHcorrected_significant_static_forestplot.svg"), dpi = 300,
-           height = 30, width = 30, unit = "cm", bg = "white")
-  p_forest_bh <-  phiper::forestplot(
-    results_tbl                 = res,
-    rank_of_interest  = "all",
-    use_diverging_colors             = TRUE,
-    filter_significant= "p_adj_rank",
-    sig_level         = 0.10,
-    left_label        = paste0("More in ", df_rank$group1[1]),
-    right_label       = paste0("More in ", df_rank$group2[1]),
-    label_vjust        = -0.9,
-    y_pad             = 0.3,
-    label_x_gap_frac     = -0.3,
-    statistic_to_plot              = "T_stand"
+  CairoSVG(file.path(out_dir, "DELTA_framework", "BHcorrected_significant_static_forestplot.svg"),
+    dpi = 300,
+    height = 30, width = 30, unit = "cm", bg = "white"
+  )
+  p_forest_bh <- phiper::forestplot(
+    results_tbl = res,
+    rank_of_interest = "all",
+    use_diverging_colors = TRUE,
+    filter_significant = "p_adj_rank",
+    sig_level = 0.10,
+    left_label = paste0("More in ", df_rank$group1[1]),
+    right_label = paste0("More in ", df_rank$group2[1]),
+    label_vjust = -0.9,
+    y_pad = 0.3,
+    label_x_gap_frac = -0.3,
+    statistic_to_plot = "T_stand"
   )
   print(p_forest_bh)
   dev.off()
 
   p_inter <- phiper::forestplot_interactive(
-    results_tbl            = res,
-    rank_of_interest       = "all",
-    statistic_to_plot      = "T_stand",
-    use_diverging_colors   = TRUE,
-    filter_significant     = "p_perm",
-    left_label             = paste0("More in ", df_rank$group1[1]),
-    right_label            = paste0("More in ", df_rank$group2[1]),
-    arrow_length_frac      = 0.35,
-    label_x_gap_frac       = -0.3,
-    label_y_offset        = -0.9
+    results_tbl = res,
+    rank_of_interest = "all",
+    statistic_to_plot = "T_stand",
+    use_diverging_colors = TRUE,
+    filter_significant = "p_perm",
+    left_label = paste0("More in ", df_rank$group1[1]),
+    right_label = paste0("More in ", df_rank$group2[1]),
+    arrow_length_frac = 0.35,
+    label_x_gap_frac = -0.3,
+    label_y_offset = -0.9
   )$plot
   htmlwidgets::saveWidget(
     p_inter,
@@ -543,17 +562,17 @@ for (cmp in comparisons) {
   )
 
   p_inter <- phiper::forestplot_interactive(
-    results_tbl           = res,
-    rank_of_interest      = "all",
-    statistic_to_plot     = "T_stand",
-    filter_significant    = "p_adj_rank",
-    sig_level             = 0.10,
-    use_diverging_colors  = TRUE,
-    left_label            = paste0("More in ", df_rank$group1[1]),
-    right_label           = paste0("More in ", df_rank$group2[1]),
-    arrow_length_frac      = 0.35,
-    label_x_gap_frac       = -0.3,
-    label_y_offset        = -0.9
+    results_tbl = res,
+    rank_of_interest = "all",
+    statistic_to_plot = "T_stand",
+    filter_significant = "p_adj_rank",
+    sig_level = 0.10,
+    use_diverging_colors = TRUE,
+    left_label = paste0("More in ", df_rank$group1[1]),
+    right_label = paste0("More in ", df_rank$group2[1]),
+    arrow_length_frac = 0.35,
+    label_x_gap_frac = -0.3,
+    label_y_offset = -0.9
   )$plot
   htmlwidgets::saveWidget(
     p_inter,
@@ -572,7 +591,7 @@ for (cmp in comparisons) {
       .force_keep | (.data$p_perm < 0.05)
     ) %>%
     dplyr::arrange(
-      dplyr::desc(.force_keep),        # optional: keep forced ones at the top
+      dplyr::desc(.force_keep), # optional: keep forced ones at the top
       dplyr::desc(.data$T_obs_stand),
       dplyr::desc(.data$cross_prev_mean)
     ) %>%
@@ -595,16 +614,13 @@ for (cmp in comparisons) {
 
   get_binary_and_ids <- function(feature, peplib, tax_cols,
                                  peptide_col = "peptide_id") {
-
     if (feature %in% special_features) {
       vals <- peplib[[feature]]
       present <- !is.na(vals) & as.logical(vals)
-
     } else if (feature %in% names(peplib)) {
       vals <- peplib[[feature]]
       present <- as.logical(vals)
       present[is.na(present)] <- FALSE
-
     } else {
       if (length(tax_cols) == 0L) {
         stop("No taxonomic columns found in peptide library.")
@@ -623,10 +639,10 @@ for (cmp in comparisons) {
 
   res_with_pep <- res_filtered %>%
     mutate(
-      match_info      = map(feature, ~ get_binary_and_ids(.x, peplib, tax_cols)),
-      binary_in_peplib= map(match_info, "present"),
-      peptide_ids     = map(match_info, "peptide_ids"),
-      pep_tbl_subset  = map(peptide_ids, ~ pep_tbl %>% filter(feature %in% .x))
+      match_info = map(feature, ~ get_binary_and_ids(.x, peplib, tax_cols)),
+      binary_in_peplib = map(match_info, "present"),
+      peptide_ids = map(match_info, "peptide_ids"),
+      pep_tbl_subset = map(peptide_ids, ~ pep_tbl %>% filter(feature %in% .x))
     ) %>%
     select(-match_info)
 
@@ -636,7 +652,9 @@ for (cmp in comparisons) {
                                     size = 0.8,
                                     alpha = 0.12,
                                     color = "#808080") {
-    if (is.null(bg) || !nrow(bg)) return(p)
+    if (is.null(bg) || !nrow(bg)) {
+      return(p)
+    }
 
     bg_layer <- ggplot2::geom_point(
       data = bg,
@@ -658,11 +676,11 @@ for (cmp in comparisons) {
       return(invisible(NULL))
     }
     safe_name <- gsub("[^A-Za-z0-9_-]+", "_", as.character(feature_name))
-    base_dir       <- file.path(out_dir, "DELTA_framework", "interesting_features")
+    base_dir <- file.path(out_dir, "DELTA_framework", "interesting_features")
     dir.create(base_dir, recursive = TRUE, showWarnings = FALSE)
-    scatter_dir    <- file.path(base_dir, "scatter")
+    scatter_dir <- file.path(base_dir, "scatter")
     dir.create(scatter_dir, recursive = TRUE, showWarnings = FALSE)
-    file_prefix    <- file.path(base_dir, safe_name)
+    file_prefix <- file.path(base_dir, safe_name)
     scatter_prefix <- file.path(scatter_dir, safe_name)
 
     SHOW_BG <- TRUE
@@ -679,9 +697,9 @@ for (cmp in comparisons) {
 
       # keep only unique (percent1, percent2) combos; drop the rest at random
       if (all(c("percent1", "percent2") %in% names(bg_df))) {
-        set.seed(BG_SEED)  # makes the random pick reproducible
+        set.seed(BG_SEED) # makes the random pick reproducible
         bg_df <- bg_df %>%
-          dplyr::slice_sample(prop = 1) %>%  # shuffle rows
+          dplyr::slice_sample(prop = 1) %>% # shuffle rows
           dplyr::distinct(percent1, percent2, .keep_all = TRUE)
       }
 
@@ -692,18 +710,20 @@ for (cmp in comparisons) {
     }
 
     ## ---------------- SCATTER STATIC ----------------
-    CairoSVG(paste0(scatter_prefix, "_scatter_static.svg"), dpi = 300,
-             height = 30, width = 30, unit = "cm", bg = "white")
+    CairoSVG(paste0(scatter_prefix, "_scatter_static.svg"),
+      dpi = 300,
+      height = 30, width = 30, unit = "cm", bg = "white"
+    )
     p_scatter <- scatter_static(
-      df   = feature_data,
+      df = feature_data,
       xlab = group1,
       ylab = group2,
-      point_size       = 2,
-      point_alpha      = 0.85,
-      jitter_width_pp  = 0.15,
+      point_size = 2,
+      point_alpha = 0.85,
+      jitter_width_pp = 0.15,
       jitter_height_pp = 0.15,
-      font_family      = "Montserrat",
-      font_size        = 12
+      font_family = "Montserrat",
+      font_size = 12
     ) +
       ggplot2::coord_cartesian(xlim = c(-2, 102), ylim = c(-2, 102), expand = TRUE) +
       ggplot2::theme(
@@ -726,8 +746,8 @@ for (cmp in comparisons) {
     # Make sure background cannot “inherit” any categories
     if (!is.null(bg_df) && nrow(bg_df)) {
       bg_df <- bg_df %>%
-        dplyr::select(-dplyr::any_of(c("category"))) %>%     # safety
-        dplyr::mutate(category = "all peptides")            # force separate legend/trace
+        dplyr::select(-dplyr::any_of(c("category"))) %>% # safety
+        dplyr::mutate(category = "all peptides") # force separate legend/trace
     }
 
     cat_cols <- c(
@@ -742,18 +762,17 @@ for (cmp in comparisons) {
       xlab = group1,
       ylab = group2,
       peplib = peplib,
-
-      show_background   = TRUE,
-      background_df     = bg_df,
-      background_name   = "all peptides",
-      background_color  = "#808080",
-      background_alpha  = 0.40,
-      background_size   = 7,
-      background_max_n  = Inf,
+      show_background = TRUE,
+      background_df = bg_df,
+      background_name = "all peptides",
+      background_color = "#808080",
+      background_alpha = 0.40,
+      background_size = 7,
+      background_max_n = Inf,
       category_colors = cat_cols,
-      point_size  = 16,
+      point_size = 16,
       point_alpha = 0.95,
-      jitter_width_pp  = 0.05,
+      jitter_width_pp = 0.05,
       jitter_height_pp = 0.05,
       font_size = 12
     )
@@ -774,11 +793,13 @@ for (cmp in comparisons) {
 
     ## ---------------- DELTA PLOT: conditional smooth ----------------
     use_smooth <- nrow(feature_data) >= 7
-    smooth_k   <- if (use_smooth) 3L else 1L
+    smooth_k <- if (use_smooth) 3L else 1L
 
     ## ---------------- DELTA PLOT STATIC ----------------
-    CairoSVG(paste0(file_prefix, "_deltaplot_static.svg"), dpi = 300,
-             height = 30, width = 30, unit = "cm", bg = "white")
+    CairoSVG(paste0(file_prefix, "_deltaplot_static.svg"),
+      dpi = 300,
+      height = 30, width = 30, unit = "cm", bg = "white"
+    )
     p_delta_static <- tryCatch(
       {
         deltaplot(
@@ -821,7 +842,7 @@ for (cmp in comparisons) {
         point_size          = 6,
         add_smooth          = use_smooth,
         smooth_k            = smooth_k,
-        arrow_length_frac   = 0.35,   # old arrow_frac_h
+        arrow_length_frac   = 0.35, # old arrow_frac_h
         point_jitter_width  = 0.01,
         point_jitter_height = 0.01
       ),
@@ -842,8 +863,10 @@ for (cmp in comparisons) {
     }
 
     ## ---------------- ECDF STATIC ----------------
-    CairoSVG(paste0(file_prefix, "_ecdfplot_static.svg"), dpi = 300,
-             height = 30, width = 30, unit = "cm", bg = "white")
+    CairoSVG(paste0(file_prefix, "_ecdfplot_static.svg"),
+      dpi = 300,
+      height = 30, width = 30, unit = "cm", bg = "white"
+    )
     p_ecdf_static <- tryCatch(
       {
         ecdf_plot(
@@ -883,8 +906,7 @@ for (cmp in comparisons) {
         line_alpha          = 1,
         show_median_lines   = TRUE,
         show_ks_test        = TRUE
-      )
-      ,
+      ),
       error = function(e) {
         message(
           "ECDF interactive plot failed for ", feature_name,
@@ -907,8 +929,8 @@ for (cmp in comparisons) {
   n_features <- nrow(res_with_pep)
   for (i in seq_len(n_features)) {
     feature_name <- res_with_pep$feature[i]
-    group1       <- res_with_pep$pep_tbl_subset[[i]]$group1[1]
-    group2       <- res_with_pep$pep_tbl_subset[[i]]$group2[1]
+    group1 <- res_with_pep$pep_tbl_subset[[i]]$group1[1]
+    group2 <- res_with_pep$pep_tbl_subset[[i]]$group2[1]
     feature_data <- res_with_pep$pep_tbl_subset[[i]]
     message("Plotting [", i, "/", n_features, "]: ", feature_name)
     plot_feature_all(feature_name, group1, group2, feature_data, out_dir)
