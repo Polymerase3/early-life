@@ -702,7 +702,7 @@ orig_tbl <- dbplyr::remote_name(ps_merged_meta_bin$data_long)
 
 core_cols <- c(
   "sample_id", "peptide_id", "subject_id",
-  "big_group", "timepoint_recoded", "dyade_recoded", "exist"
+  "big_group", "timepoint_recoded", "dyade_recoded", "exist", "fold_change"
 )
 
 # define list of comparisons (pairs of group labels) to analyze

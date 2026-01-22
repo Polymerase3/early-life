@@ -15,6 +15,8 @@ N_CORES <- 30
 LOG <- TRUE
 LOG_FILE <- NULL
 MAX_GB <- 40
+CMP_INDEX <- NA_integer_
+CMP_KEY <- NULL
 args <- commandArgs(trailingOnly = TRUE)
 for (arg in args) {
   if (grepl("=", arg)) {
@@ -36,6 +38,11 @@ for (arg in args) {
       }
     } else if (key == "LOG_FILE") {
       LOG_FILE <- sub("^['\\\"]|['\\\"]$", "", value)
+    } else if (key %in% c("CMP_INDEX", "COMPARISON_INDEX")) {
+      val_num <- suppressWarnings(as.integer(value))
+      if (!is.na(val_num)) CMP_INDEX <- val_num
+    } else if (key %in% c("CMP_KEY", "COMPARISON_KEY")) {
+      CMP_KEY <- sub("^['\\\"]|['\\\"]$", "", value)
     }
   }
 }
@@ -109,6 +116,32 @@ comparisons <- list(
   c("kid_serum_T8_sex_male", "kid_serum_T8_sex_female")
 )
 
+if (is.na(CMP_INDEX)) {
+  env_idx <- Sys.getenv("SLURM_ARRAY_TASK_ID", "")
+  if (nzchar(env_idx)) {
+    val_num <- suppressWarnings(as.integer(env_idx))
+    if (!is.na(val_num)) CMP_INDEX <- val_num
+  }
+}
+
+if (!is.null(CMP_KEY) && !is.na(CMP_INDEX)) {
+  stop("Provide only one of CMP_KEY or CMP_INDEX (or SLURM_ARRAY_TASK_ID).")
+}
+
+if (!is.null(CMP_KEY)) {
+  cmp_keys <- vapply(comparisons, paste, collapse = "|", FUN.VALUE = character(1))
+  match_idx <- match(CMP_KEY, cmp_keys)
+  if (is.na(match_idx)) {
+    stop("CMP_KEY not found in comparisons list: ", CMP_KEY)
+  }
+  comparisons <- list(comparisons[[match_idx]])
+} else if (!is.na(CMP_INDEX)) {
+  if (CMP_INDEX < 1L || CMP_INDEX > length(comparisons)) {
+    stop("CMP_INDEX out of range: ", CMP_INDEX, " (1..", length(comparisons), ")")
+  }
+  comparisons <- list(comparisons[[CMP_INDEX]])
+}
+
 paired_subject_comparisons <- list(
   c("mom_serum_T0", "mom_serum_T1"),
   c("mom_serum_T0", "mom_serum_T2"),
@@ -130,7 +163,7 @@ paired_subject_keys <- vapply(paired_subject_comparisons, paste, collapse = "|",
 paired_dyade_keys <- vapply(paired_dyade_comparisons, paste, collapse = "|", FUN.VALUE = character(1))
 
 # columns always to keep in saved data
-base_cols <- c("sample_id", "peptide_id", "group_char", "exist")
+base_cols <- c("sample_id", "peptide_id", "group_char", "exist", "fold_change")
 
 # helper function to safely save an RDS file after creating directories
 save_rds_safe <- function(x, path) {
@@ -204,7 +237,8 @@ for (cmp in comparisons) {
   # save the filtered dataset for this comparison
   make_and_save(
     data     = ps_cmp,
-    out_path = file.path(out_dir, paste0(label_dir, "_data.rds"))
+    out_path = file.path(out_dir, paste0(label_dir, "_data.rds")),
+    extra_vars = paired_col
   )
 
   # ------------------ enrichment counts ------------------
@@ -231,6 +265,9 @@ for (cmp in comparisons) {
   dev.off()
 
   # ------------------ beta diversity ---------------------
+  ps_cmp$data_long <- ps_cmp$data_long %>%
+    mutate(sample_id = as.character(sample_id))
+
   dist_bc <- phiper:::compute_distance(ps_cmp,
     value_col = "exist",
     method_normalization = "hellinger",
@@ -266,9 +303,6 @@ for (cmp in comparisons) {
   p_tsne2d <- phiper:::plot_tsne(tsne_res, view = "2d", colour = "group_char", palette = c("blue", "green"))
   print(p_tsne2d)
   dev.off()
-
-  ps_cmp$data_long <- ps_cmp$data_long %>%
-    mutate(sample_id = as.character(sample_id))
 
   tsne_res <- phiper:::compute_tsne(
     ps = ps_cmp, dist_obj = dist_bc, dims = 3L,
@@ -459,7 +493,6 @@ for (cmp in comparisons) {
   # ------------------ DELTA framework ---------------------
   dir.create(file.path(out_dir, "DELTA_framework"), recursive = TRUE, showWarnings = FALSE)
 
-  data_frameworks$subject_id <- data_frameworks$sample_id
   peplib[] <- lapply(peplib, as.character)
   log_file_current <- if (is.null(LOG_FILE)) {
     file.path(out_dir, "DELTA_framework", "log.txt")
@@ -473,7 +506,12 @@ for (cmp in comparisons) {
     rank_cols = c(
       "phylum", "class", "order", "family", "genus", "species",
       "is_auto", "is_infect", "is_EBV", "is_toxin", "is_PNP", "is_EM",
-      "is_MPA", "is_patho", "is_probio", "is_IgA", "is_flagellum", "is_allergens"
+      "is_MPA", "is_patho", "is_probio", "is_IgA", "is_flagellum", "is_allergens",
+      "anno_other", "anno_eucaryotic_pathogens", "anno_animals",
+      "anno_fly_worm_bee_cocroach_mite_mosquito", "anno_plant_grass",
+      "anno_is_fungi", "anno_fungi_type", "anno_is_food",
+      "anno_food_subcategory", "anno_food_item", "anno_bacteria_archaea",
+      "anno_is_homo_sapiens", "anno_viruses_bacteriophage", "anno_is_lacto_phage"
     ),
     group_cols = "group_char",
     peptide_library = peplib,
@@ -488,7 +526,8 @@ for (cmp in comparisons) {
     rank_feature_keep = list(
       phylum = NULL, class = NULL, order = NULL, family = NULL, genus = NULL, species = NULL,
       is_auto = "TRUE", is_infect = "TRUE", is_EBV = "TRUE", is_toxin = "TRUE", is_PNP = "TRUE", is_EM = "TRUE",
-      is_MPA = "TRUE", is_patho = "TRUE", is_probio = "TRUE", is_IgA = "TRUE", is_flagellum = "TRUE", is_allergens = "TRUE"
+      is_MPA = "TRUE", is_patho = "TRUE", is_probio = "TRUE", is_IgA = "TRUE", is_flagellum = "TRUE", is_allergens = "TRUE",
+      anno_is_fungi = "TRUE", anno_is_food = "TRUE", anno_is_homo_sapiens = "TRUE", anno_is_lacto_phage = "TRUE"
     ),
     log = LOG,
     log_file = log_file_current,
@@ -609,7 +648,8 @@ for (cmp in comparisons) {
     "is_IEDB_or_cntrl", "is_auto", "is_infect", "is_EBV",
     "is_toxin", "is_PNP", "is_EM", "is_MPA", "is_patho",
     "is_probio", "is_IgA", "is_flagellum", "signalp6_slow",
-    "is_topgraph_new", "is_allergens"
+    "is_topgraph_new", "is_allergens",
+    "anno_is_fungi", "anno_is_food", "anno_is_homo_sapiens", "anno_is_lacto_phage"
   )
 
   get_binary_and_ids <- function(feature, peplib, tax_cols,
