@@ -97,6 +97,13 @@ withr::with_preserve_seed({
   )
 })
 
+# split sampleID into run/plate and drop the original column
+ps <- ps %>%
+  mutate(
+    run_id   = dbplyr::sql("regexp_extract(sample_id, '^(R\\d+)', 1)"),
+    plate_id = dbplyr::sql("regexp_extract(sample_id, '^R\\d+(P\\d+)', 1)")
+  )
+
 ## load the ages data.frame
 ages <- read_excel("data/time_collection_blood_LLNEXT.xlsx",
   col_types = c(
@@ -190,7 +197,7 @@ withr::with_preserve_seed({
 
 ## selecting only necessary variables
 ps_merged %<>% dplyr::select(
-  sample_id, subject_id, big_group,
+  sample_id, subject_id, run_id, plate_id, big_group,
   timepoint, timepoint_factor, peptide_id, relative,
   dyade, exact_age, fold_change
 )
@@ -701,53 +708,32 @@ con <- ps_merged_meta_bin$meta$con
 orig_tbl <- dbplyr::remote_name(ps_merged_meta_bin$data_long)
 
 core_cols <- c(
-  "sample_id", "peptide_id", "subject_id",
+  "sample_id", "peptide_id", "subject_id", "run_id", "plate_id",
   "big_group", "timepoint_recoded", "dyade_recoded", "exist", "fold_change"
 )
 
-# define list of comparisons (pairs of group labels) to analyze
-comparisons <- list(
-  c("mom_serum_T0", "mom_serum_T1"),
-  c("mom_serum_T0", "mom_serum_T2"),
-  # c("mom_serum_T1", "mom_serum_T2"),
+# define list of comparisons and longitudinal flags
+source("R/zzz.R")
 
-  c("mom_serum_T2", "kid_serum_T2"),
-  c("kid_serum_T2", "kid_serum_T6"),
-  c("kid_serum_T2", "kid_serum_T8"),
-  c("kid_serum_T6", "kid_serum_T8"),
-  c("kid_serum_T2", "kid_serum_T8"),
-  c("mom_milk_T4", "mom_milk_T6"),
-  c("mom_milk_T4", "mom_milk_T7"),
-  c("mom_milk_T4", "mom_milk_T8"),
-  c("kid_serum_T6", "mom_milk_T6"),
-  c("kid_serum_T8", "mom_milk_T8"),
-  c("kid_serum_T2_siblings", "kid_serum_T2_no_siblings"),
-  c("kid_serum_T6_siblings", "kid_serum_T6_no_siblings"),
-  c("kid_serum_T8_siblings", "kid_serum_T8_no_siblings"),
-  c("kid_serum_T2_delmode_VG", "kid_serum_T2_delmode_CS"),
-  c("kid_serum_T6_delmode_VG", "kid_serum_T6_delmode_CS"),
-  c("kid_serum_T8_delmode_VG", "kid_serum_T8_delmode_CS"),
-  c("kid_serum_T2_delplace_home", "kid_serum_T2_delplace_hospital"),
-  c("kid_serum_T6_delplace_home", "kid_serum_T6_delplace_hospital"),
-  c("kid_serum_T8_delplace_home", "kid_serum_T8_delplace_hospital"),
-  c("kid_serum_T2_feeding_BF", "kid_serum_T2_feeding_MF"),
-  c("kid_serum_T6_feeding_BF", "kid_serum_T6_feeding_MF"),
-  c("kid_serum_T8_feeding_BF", "kid_serum_T8_feeding_MF"),
-  c("kid_serum_T2_preterm_yes", "kid_serum_T2_preterm_no"),
-  c("kid_serum_T6_preterm_yes", "kid_serum_T6_preterm_no"),
-  c("kid_serum_T8_preterm_yes", "kid_serum_T8_preterm_no"),
-  c("kid_serum_T2_CDrisk_yes", "kid_serum_T2_CDrisk_no"),
-  c("kid_serum_T6_CDrisk_yes", "kid_serum_T6_CDrisk_no"),
-  c("kid_serum_T8_CDrisk_yes", "kid_serum_T8_CDrisk_no"),
-  c("kid_serum_T2_lockdown_before", "kid_serum_T2_lockdown_after"),
-  c("kid_serum_T6_lockdown_before", "kid_serum_T6_lockdown_after"),
-  c("kid_serum_T8_lockdown_before", "kid_serum_T8_lockdown_after"),
-  c("kid_serum_T2_smoking_yes", "kid_serum_T2_smoking_no"),
-  c("kid_serum_T6_smoking_yes", "kid_serum_T6_smoking_no"),
-  c("kid_serum_T8_smoking_yes", "kid_serum_T8_smoking_no"),
-  c("kid_serum_T2_sex_male", "kid_serum_T2_sex_female"),
-  c("kid_serum_T6_sex_male", "kid_serum_T6_sex_female"),
-  c("kid_serum_T8_sex_male", "kid_serum_T8_sex_female")
+cov_suffix_to_col <- c(
+  siblings = "siblings_yes",
+  no_siblings = "siblings_no",
+  delmode_VG = "delmode_VG",
+  delmode_CS = "delmode_CS",
+  delplace_home = "delplace_home",
+  delplace_hospital = "delplace_hospital",
+  feeding_BF = "feeding_BF",
+  feeding_MF = "feeding_MF",
+  preterm_yes = "preterm_yes",
+  preterm_no = "preterm_no",
+  CDrisk_yes = "CDrisk_yes",
+  CDrisk_no = "CDrisk_no",
+  lockdown_before = "lockdown_before",
+  lockdown_after = "lockdown_after",
+  smoking_yes = "smoking_yes",
+  smoking_no = "smoking_no",
+  sex_male = "sex_male",
+  sex_female = "sex_female"
 )
 
 # comparisons must exist already in your env
@@ -759,10 +745,15 @@ parse_label <- function(label) {
   x <- regmatches(label, m)[[1]]
   if (length(x) == 0) stop("Bad label format: ", label)
 
+  cov_suffix <- if (length(x) >= 5 && nzchar(x[4])) x[4] else NA_character_
+  if (!is.na(cov_suffix) && !cov_suffix %in% names(cov_suffix_to_col)) {
+    stop("Unknown covariate suffix in label: ", cov_suffix)
+  }
+
   list(
     big_group = x[2],
     tp        = x[3],
-    cov       = if (length(x) >= 5 && nzchar(x[4])) x[4] else NA_character_
+    cov_col   = if (is.na(cov_suffix)) NA_character_ else unname(cov_suffix_to_col[[cov_suffix]])
   )
 }
 
@@ -776,27 +767,16 @@ make_label_expr_sql <- function(label, con) {
     DBI::dbQuoteString(con, p$tp)
   )
 
-  if (!is.na(p$cov)) {
+  if (!is.na(p$cov_col)) {
     # cov is an existing 0/1 dummy; treat NA as 0
     cov_sql <- sprintf(
       "(COALESCE(%s, 0) = 1)",
-      DBI::dbQuoteIdentifier(con, p$cov)
+      DBI::dbQuoteIdentifier(con, p$cov_col)
     )
     base <- sprintf("(%s AND %s)", base, cov_sql)
   }
 
   sprintf("%s AS %s", base, DBI::dbQuoteIdentifier(con, label))
-}
-
-# Optional: fail fast if any covariate columns are missing
-desc <- DBI::dbGetQuery(con, sprintf("DESCRIBE %s;", DBI::dbQuoteIdentifier(con, orig_tbl)))
-colname_field <- if ("column_name" %in% names(desc)) "column_name" else names(desc)[1]
-existing_cols <- desc[[colname_field]]
-
-covs_needed <- unique(na.omit(vapply(labels, function(x) parse_label(x)$cov, character(1))))
-missing_covs <- setdiff(covs_needed, existing_cols)
-if (length(missing_covs) > 0) {
-  stop("Missing covariate columns needed for labels: ", paste(missing_covs, collapse = ", "))
 }
 
 # Build SELECT list
