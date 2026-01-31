@@ -71,50 +71,8 @@ get_peptide_library(ps) %>%
   as.data.frame() %>%
   saveRDS(file = "results/peptide_library.rds")
 
-# define list of comparisons (pairs of group labels) to analyze
-comparisons <- list(
-  c("mom_serum_T0", "mom_serum_T1"),
-  c("mom_serum_T0", "mom_serum_T2"),
-  # c("mom_serum_T1", "mom_serum_T2"),
-
-  c("mom_serum_T2", "kid_serum_T2"),
-  c("kid_serum_T2", "kid_serum_T6"),
-  c("kid_serum_T2", "kid_serum_T8"),
-  c("kid_serum_T6", "kid_serum_T8"),
-  c("kid_serum_T2", "kid_serum_T8"),
-  c("mom_milk_T4", "mom_milk_T6"),
-  c("mom_milk_T4", "mom_milk_T7"),
-  c("mom_milk_T4", "mom_milk_T8"),
-  c("kid_serum_T6", "mom_milk_T6"),
-  c("kid_serum_T8", "mom_milk_T8"),
-  c("kid_serum_T2_siblings", "kid_serum_T2_no_siblings"),
-  c("kid_serum_T6_siblings", "kid_serum_T6_no_siblings"),
-  c("kid_serum_T8_siblings", "kid_serum_T8_no_siblings"),
-  c("kid_serum_T2_delmode_VG", "kid_serum_T2_delmode_CS"),
-  c("kid_serum_T6_delmode_VG", "kid_serum_T6_delmode_CS"),
-  c("kid_serum_T8_delmode_VG", "kid_serum_T8_delmode_CS"),
-  c("kid_serum_T2_delplace_home", "kid_serum_T2_delplace_hospital"),
-  c("kid_serum_T6_delplace_home", "kid_serum_T6_delplace_hospital"),
-  c("kid_serum_T8_delplace_home", "kid_serum_T8_delplace_hospital"),
-  c("kid_serum_T2_feeding_BF", "kid_serum_T2_feeding_MF"),
-  c("kid_serum_T6_feeding_BF", "kid_serum_T6_feeding_MF"),
-  c("kid_serum_T8_feeding_BF", "kid_serum_T8_feeding_MF"),
-  c("kid_serum_T2_preterm_yes", "kid_serum_T2_preterm_no"),
-  c("kid_serum_T6_preterm_yes", "kid_serum_T6_preterm_no"),
-  c("kid_serum_T8_preterm_yes", "kid_serum_T8_preterm_no"),
-  c("kid_serum_T2_CDrisk_yes", "kid_serum_T2_CDrisk_no"),
-  c("kid_serum_T6_CDrisk_yes", "kid_serum_T6_CDrisk_no"),
-  c("kid_serum_T8_CDrisk_yes", "kid_serum_T8_CDrisk_no"),
-  c("kid_serum_T2_lockdown_before", "kid_serum_T2_lockdown_after"),
-  c("kid_serum_T6_lockdown_before", "kid_serum_T6_lockdown_after"),
-  c("kid_serum_T8_lockdown_before", "kid_serum_T8_lockdown_after"),
-  c("kid_serum_T2_smoking_yes", "kid_serum_T2_smoking_no"),
-  c("kid_serum_T6_smoking_yes", "kid_serum_T6_smoking_no"),
-  c("kid_serum_T8_smoking_yes", "kid_serum_T8_smoking_no"),
-  c("kid_serum_T2_sex_male", "kid_serum_T2_sex_female"),
-  c("kid_serum_T6_sex_male", "kid_serum_T6_sex_female"),
-  c("kid_serum_T8_sex_male", "kid_serum_T8_sex_female")
-)
+# define list of comparisons and longitudinal flags
+source("R/zzz.R")
 
 if (is.na(CMP_INDEX)) {
   env_idx <- Sys.getenv("SLURM_ARRAY_TASK_ID", "")
