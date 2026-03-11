@@ -6,16 +6,15 @@ This repository contains the analysis code written by **Mateusz Franciszek Kolek
 
 ## phiper
 
-The analyses rely on the in-house R package **phiper**. The version used in this project is **0.2.6**; the source tarballs are included in the root of this repository:
+The analyses rely on the in-house R package **phiper**. The version used in this project is **0.2.6**; the source tarball is included in the root of this repository:
 
 - `phiper_0.2.6.tar.gz`
-- `phiper-0.2.6.tar.gz`
 
 The latest version of phiper is maintained at: https://github.com/Polymerase3/phiper
 
 ---
 
-## R/ — analysis scripts
+## R/ - analysis scripts
 
 | File | Description |
 |------|-------------|
