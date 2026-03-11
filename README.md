@@ -1,5 +1,12 @@
 # Early Life — Lifelines NEXT Analysis
 
+[![phiper](https://img.shields.io/badge/phiper-Polymerase3%2Fphiper-blue)](https://github.com/Polymerase3/phiper)
+[![Lifecycle: stable](https://lifecycle.r-lib.org/articles/figures/lifecycle-stable.svg)](https://lifecycle.r-lib.org/articles/stages.html#stable)
+[![Project Status: inactive](https://www.repostatus.org/badges/latest/inactive.svg)](https://www.repostatus.org/#inactive)
+
+This repository contains a frozen analysis pipeline for PhIP-Seq early-life antibody repertoire data from the Lifelines NEXT cohort.
+The goal is reproducibility, not ongoing development.
+
 This repository contains the analysis code written by **Mateusz Franciszek Kolek (MFK)** for a scientific article based on the **Lifelines NEXT** cohort. The study examines the PhIP-Seq antibody repertoires of mothers and their infants using serum and breast milk samples across multiple timepoints.
 
 ---
