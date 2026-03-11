@@ -13,7 +13,7 @@
 *-Ex.R
 
 # Output files from R CMD build
-/*.tar.gz
+phiper-0.2.6.tar.gz
 
 # Output files from R CMD check
 /*.Rcheck/
@@ -50,3 +50,9 @@ rsconnect/
 
 results/
 data/
+.RDataTmp1
+.swn
+.swo
+.swp
+plan.txt
+main_figures/
