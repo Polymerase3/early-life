@@ -520,6 +520,9 @@ metas <- metas %>%
   ) %>%
   select(-feedmode_m3_clean) # drop helper
 
+# cache cleaned metas for downstream descriptives
+saveRDS(metas, file = "data/metas_clean.rds")
+
 ## ------------------- BINARIZING METADATA -------------------------------------
 ## converting the metadata to binary dummies
 metas_out <- metas %>%
@@ -709,7 +712,9 @@ orig_tbl <- dbplyr::remote_name(ps_merged_meta_bin$data_long)
 
 core_cols <- c(
   "sample_id", "peptide_id", "subject_id", "run_id", "plate_id",
-  "big_group", "timepoint_recoded", "dyade_recoded", "exist", "fold_change"
+  "big_group", "timepoint_recoded", "dyade", "dyade_recoded",
+  "months_since_birth",
+  "exist", "fold_change"
 )
 
 # define list of comparisons and longitudinal flags
@@ -745,7 +750,7 @@ parse_label <- function(label) {
   x <- regmatches(label, m)[[1]]
   if (length(x) == 0) stop("Bad label format: ", label)
 
-  cov_suffix <- if (length(x) >= 5 && nzchar(x[4])) x[4] else NA_character_
+  cov_suffix <- if (length(x) >= 4 && nzchar(x[4])) x[4] else NA_character_
   if (!is.na(cov_suffix) && !cov_suffix %in% names(cov_suffix_to_col)) {
     stop("Unknown covariate suffix in label: ", cov_suffix)
   }
@@ -758,39 +763,206 @@ parse_label <- function(label) {
 }
 
 # --- build SQL expression for a label (BOOLEAN column) ---
-make_label_expr_sql <- function(label, con) {
+make_label_expr_sql <- function(label, con, outer_alias = "base", meta_alias = NULL) {
   p <- parse_label(label)
 
+  qcol <- function(col) sprintf("%s.%s", outer_alias, DBI::dbQuoteIdentifier(con, col))
+  mcol <- function(col) sprintf("%s.%s", meta_alias, DBI::dbQuoteIdentifier(con, col))
+
   base <- sprintf(
-    "(big_group = %s AND timepoint_recoded = %s)",
-    DBI::dbQuoteString(con, p$big_group),
-    DBI::dbQuoteString(con, p$tp)
+    "(%s = %s AND %s = %s)",
+    qcol("big_group"), DBI::dbQuoteString(con, p$big_group),
+    qcol("timepoint_recoded"), DBI::dbQuoteString(con, p$tp)
   )
 
   if (!is.na(p$cov_col)) {
     # cov is an existing 0/1 dummy; treat NA as 0
-    cov_sql <- sprintf(
-      "(COALESCE(%s, 0) = 1)",
-      DBI::dbQuoteIdentifier(con, p$cov_col)
-    )
+    if (!is.null(meta_alias)) {
+      cov_sql <- sprintf(
+        "(COALESCE(%s, %s, 0) = 1)",
+        qcol(p$cov_col),
+        mcol(p$cov_col)
+      )
+    } else {
+      cov_sql <- sprintf(
+        "(COALESCE(%s, 0) = 1)",
+        qcol(p$cov_col)
+      )
+    }
     base <- sprintf("(%s AND %s)", base, cov_sql)
   }
 
   sprintf("%s AS %s", base, DBI::dbQuoteIdentifier(con, label))
 }
 
-# Build SELECT list
-label_exprs_sql <- vapply(labels, make_label_expr_sql, character(1), con = con)
+# For kid_serum_T2 labels, fall back to mom_serum_T2 within the same dyade
+# when no kid_serum_T2 exists for that dyade (keeps the label TRUE via mother).
+make_mom_kid_fallback_expr_sql <- function(
+  label,
+  con,
+  outer_alias = "base",
+  kid_alias = "kid_t2",
+  meta_alias = NULL
+) {
+  p <- parse_label(label)
 
+  if (p$big_group != "kid_serum" || p$tp != "T2") {
+    stop("Fallback labels only support kid_serum_T2*: ", label)
+  }
+
+  qcol <- function(col) sprintf("%s.%s", outer_alias, DBI::dbQuoteIdentifier(con, col))
+  mcol <- function(col) sprintf("%s.%s", meta_alias, DBI::dbQuoteIdentifier(con, col))
+
+  base_kid <- sprintf(
+    "(%s = %s AND %s = %s)",
+    qcol("big_group"), DBI::dbQuoteString(con, p$big_group),
+    qcol("timepoint_recoded"), DBI::dbQuoteString(con, p$tp)
+  )
+
+  base_mom <- sprintf(
+    "(%s = %s AND %s = %s)",
+    qcol("big_group"), DBI::dbQuoteString(con, "mom_serum"),
+    qcol("timepoint_recoded"), DBI::dbQuoteString(con, p$tp)
+  )
+
+  if (!is.na(p$cov_col)) {
+    if (!is.null(meta_alias)) {
+      cov_sql <- sprintf(
+        "(COALESCE(%s, %s, 0) = 1)",
+        qcol(p$cov_col),
+        mcol(p$cov_col)
+      )
+    } else {
+      cov_sql <- sprintf("(COALESCE(%s, 0) = 1)", qcol(p$cov_col))
+    }
+    base_kid <- sprintf("(%s AND %s)", base_kid, cov_sql)
+    base_mom <- sprintf("(%s AND %s)", base_mom, cov_sql)
+  }
+
+  kid_exists_sql <- sprintf("%s.%s IS NOT NULL",
+    kid_alias, DBI::dbQuoteIdentifier(con, "dyade_recoded")
+  )
+
+  fallback_label <- sub("^kid_serum_T2", "mom_kid_serum_T2", label)
+
+  sprintf(
+    "(CASE WHEN %s THEN %s ELSE %s END) AS %s",
+    kid_exists_sql,
+    base_kid,
+    base_mom,
+    DBI::dbQuoteIdentifier(con, fallback_label)
+  )
+}
+
+# Build SELECT list
+meta_cols <- unique(unname(cov_suffix_to_col))
+meta_cols <- meta_cols[!is.na(meta_cols)]
+has_meta <- length(meta_cols) > 0
+
+# Binary covariates come in mutually exclusive pairs.
+# For dyads with multiple kids:
+# - concordant kids -> keep the shared value
+# - discordant kids -> set both columns to 0 (exclude dyad from that split)
+cov_binary_pairs <- list(
+  c("siblings_yes", "siblings_no"),
+  c("delmode_VG", "delmode_CS"),
+  c("delplace_home", "delplace_hospital"),
+  c("feeding_BF", "feeding_MF"),
+  c("preterm_yes", "preterm_no"),
+  c("CDrisk_yes", "CDrisk_no"),
+  c("lockdown_before", "lockdown_after"),
+  c("smoking_yes", "smoking_no"),
+  c("sex_male", "sex_female")
+)
+
+label_exprs_sql <- vapply(
+  labels,
+  make_label_expr_sql,
+  character(1),
+  con = con,
+  meta_alias = if (has_meta) "meta_dyade" else NULL
+)
+
+kid_t2_labels <- labels[grepl("^kid_serum_T2(?:_|$)", labels)]
+if (length(kid_t2_labels) > 0) {
+  fallback_exprs_sql <- vapply(
+    kid_t2_labels,
+    make_mom_kid_fallback_expr_sql,
+    character(1),
+    con = con,
+    meta_alias = if (has_meta) "meta_dyade" else NULL
+  )
+  label_exprs_sql <- c(label_exprs_sql, fallback_exprs_sql)
+}
+
+core_cols_sql <- paste(sprintf("base.%s", DBI::dbQuoteIdentifier(con, core_cols)), collapse = ",\n  ")
 select_sql <- paste(
   c(
-    paste(DBI::dbQuoteIdentifier(con, core_cols), collapse = ",\n  "),
+    core_cols_sql,
     paste(label_exprs_sql, collapse = ",\n  ")
   ),
   collapse = ",\n  "
 )
 
 new_tbl <- paste0(orig_tbl, "__core_plus_labels")
+
+# Limit DuckDB resource usage to avoid OOM during CREATE TABLE AS SELECT.
+DBI::dbExecute(con, "PRAGMA threads=20;")
+DBI::dbExecute(con, "PRAGMA memory_limit='55GB';")
+DBI::dbExecute(con, "PRAGMA temp_directory='/tmp/duckdb_tmp';")
+
+from_sql <- sprintf("%s AS base", DBI::dbQuoteIdentifier(con, orig_tbl))
+if (has_meta) {
+  pair_sql <- unlist(lapply(cov_binary_pairs, function(pair) {
+    col_a <- DBI::dbQuoteIdentifier(con, pair[1])
+    col_b <- DBI::dbQuoteIdentifier(con, pair[2])
+    both_sql <- sprintf(
+      "(MAX(CASE WHEN %s THEN 1 ELSE 0 END) = 1 AND MAX(CASE WHEN %s THEN 1 ELSE 0 END) = 1)",
+      col_a, col_b
+    )
+
+    c(
+      sprintf(
+        "CASE WHEN %s THEN 0 ELSE MAX(CASE WHEN %s THEN 1 ELSE 0 END) END AS %s",
+        both_sql, col_a, col_a
+      ),
+      sprintf(
+        "CASE WHEN %s THEN 0 ELSE MAX(CASE WHEN %s THEN 1 ELSE 0 END) END AS %s",
+        both_sql, col_b, col_b
+      )
+    )
+  }))
+  meta_cols_sql <- paste(pair_sql, collapse = ",\n     ")
+
+  meta_sql <- sprintf(
+    "SELECT %s,\n     %s\n     FROM %s\n     WHERE %s = %s\n     GROUP BY %s",
+    DBI::dbQuoteIdentifier(con, "dyade_recoded"),
+    meta_cols_sql,
+    DBI::dbQuoteIdentifier(con, orig_tbl),
+    DBI::dbQuoteIdentifier(con, "big_group"),
+    DBI::dbQuoteString(con, "kid_serum"),
+    DBI::dbQuoteIdentifier(con, "dyade_recoded")
+  )
+  from_sql <- sprintf(
+    "%s\n   LEFT JOIN (\n     %s\n   ) AS meta_dyade\n   ON meta_dyade.%s = base.%s",
+    from_sql,
+    meta_sql,
+    DBI::dbQuoteIdentifier(con, "dyade_recoded"),
+    DBI::dbQuoteIdentifier(con, "dyade_recoded")
+  )
+}
+if (length(kid_t2_labels) > 0) {
+  from_sql <- sprintf(
+    "%s\n   LEFT JOIN (\n     SELECT DISTINCT %s\n     FROM %s\n     WHERE %s = %s AND %s = %s\n   ) AS kid_t2\n   ON kid_t2.%s = base.%s",
+    from_sql,
+    DBI::dbQuoteIdentifier(con, "dyade_recoded"),
+    DBI::dbQuoteIdentifier(con, orig_tbl),
+    DBI::dbQuoteIdentifier(con, "big_group"), DBI::dbQuoteString(con, "kid_serum"),
+    DBI::dbQuoteIdentifier(con, "timepoint_recoded"), DBI::dbQuoteString(con, "T2"),
+    DBI::dbQuoteIdentifier(con, "dyade_recoded"),
+    DBI::dbQuoteIdentifier(con, "dyade_recoded")
+  )
+}
 
 sql_create <- sprintf(
   "CREATE TABLE %s AS
@@ -799,7 +971,7 @@ sql_create <- sprintf(
    FROM %s;",
   DBI::dbQuoteIdentifier(con, new_tbl),
   select_sql,
-  DBI::dbQuoteIdentifier(con, orig_tbl)
+  from_sql
 )
 
 DBI::dbExecute(con, sql_create)
