@@ -7,8 +7,10 @@ library(openxlsx)
 library(dplyr)
 library(purrr)
 library(locfdr)
+library(Rtsne)
+library(plotly)
 
-set.seed(632961)
+set.seed(15092025)
 
 # parse command-line arguments for optional parameters
 N_CORES <- 30
@@ -65,7 +67,7 @@ withr::with_preserve_seed({
 })
 
 ## source helper functions from other file to not overcrowd this one
-source("scripts/99-utils.R")
+source("R/99-utils.R")
 
 ## cave! the code here is extremely repetitive and i know it - i simply didn't
 ## have time to deal with the issue + it works
@@ -76,45 +78,81 @@ ps_cmp$data_long <- ps_cmp$data_long %>%
   filter(
     !is.na(subject_id),
     !is.na(big_group),
-    !is.na(timepoint_factor),
-    !is.na(dyade)
+    !is.na(timepoint_recoded),
+    !is.na(dyade_recoded)
   ) %>%
   mutate(
-    sample_id = paste(subject_id, big_group, timepoint_factor, dyade, sep = "__"),
-    sample_id = as.character(sample_id)
+    # retain original sample_id but align auxiliary column names used later
+    sample_id = as.character(sample_id),
+    timepoint_factor = timepoint_recoded,
+    dyade = dyade_recoded
   )
 
-# now read the previously saved meta for kids
-meta_kids <- readRDS("data/meta_kids.rds")
+# sample-level metadata lookup (lazy -> collected)
+sample_meta <- ps_cmp$data_long %>%
+  select(
+    sample_id,
+    subject_id,
+    big_group,
+    timepoint_recoded,
+    dyade_recoded,
+    run_id,
+    plate_id,
+    months_since_birth
+  ) %>%
+  distinct() %>%
+  collect()
+
+# ensure output directories exist before any caching/writing
+dir.create("results/tsne", recursive = TRUE, showWarnings = FALSE)
+dir.create("results/tsne/data", recursive = TRUE, showWarnings = FALSE)
+
+# # now read the previously saved meta for kids
+# meta_kids <- readRDS("data/meta_kids.rds")
 
 ## ------------------- KULCZYNSKI DISTANCE + META PARSER -----------------------
-dist_bc <- phiper:::compute_distance(
-  ps_cmp,
-  value_col = "exist",
-  method_normalization = "hellinger",
-  distance = "kulczynski",
-  n_threads = 10
-)
-D <- as.matrix(dist_bc)
+# cache distance matrix to avoid expensive recomputation
+dist_cache_path <- file.path("results", "tsne", "data", "dist_bc.rds")
 
+if (file.exists(dist_cache_path)) {
+  dist_bc <- readRDS(dist_cache_path)
+} else {
+  dist_bc <- phiper:::compute_distance(
+    ps_cmp,
+    value_col = "exist",
+    method_normalization = "none",
+    distance = "kulczynski",
+    n_threads = 10
+  )
+  saveRDS(dist_bc, dist_cache_path)
+}
+
+D <- as.matrix(dist_bc)
+D2 <- as.matrix(readRDS("/home/noxia/Documents/ccr_job/early_life_github/data/full_mat.rds"))
+# D3 <- kulczynski_dist(D2)
+
+D[rownames(D) == "R26P03_21_300500-M-P28-EDTA-1_LLNext_P8_A_T_C2", colnames(D) == "R25P04_40_003980-M-P12-EDTA-1_LLNext_P5_A_T_C2"]
+# D3[rownames(D3) == "300500__mom_serum__T1__117", colnames(D3) == "003980__mom_serum__T0__65"]
+
+# "R26P03_21_300500-M-P28-EDTA-1_LLNext_P8_A_T_C2" "R25P04_40_003980-M-P12-EDTA-1_LLNext_P5_A_T_C2"
+# "300500__mom_serum__T1__117" "003980__mom_serum__T0__65"
 # safety: make sure D is a proper distance matrix
 stopifnot(identical(rownames(D), colnames(D)))
 
 nms <- rownames(D)
 
-# parse "subject_id__big_group__timepoint_factor__dyade"
-parts <- stringr::str_split_fixed(nms, "__", 4)
-parsed <- tibble(
-  id_full          = nms,
-  subject_id       = parts[, 1],
-  big_group        = parts[, 2],
-  timepoint_factor = parts[, 3],
-  dyade            = parts[, 4]
-)
+# build parsed meta by joining resolved metadata instead of string splitting
+parsed <- sample_meta %>%
+  filter(sample_id %in% nms) %>%
+  mutate(sample_id = as.character(sample_id)) %>%
+  arrange(match(sample_id, nms)) %>%
+  rename(id_full = sample_id)
+
+# sanity: keep same length/order as distance matrix
+stopifnot(identical(parsed$id_full, nms))
 
 ## ------------------- tSNE: 1-3 -----------------------------------------------
 # seed for reproducibility
-set.seed(15092025)
 
 # performing the tSNE
 ## 2-dimensional
@@ -155,8 +193,8 @@ saveRDS(tsne_df_3d, "results/tsne/data/group_time_dyade_tsne3d.rds")
 
 # paths
 tsne_df_2d %<>%
-  mutate(tp_num = readr::parse_number(timepoint_factor)) %>%
-  arrange(dyade, tp_num)
+  mutate(tp_num = readr::parse_number(timepoint_recoded)) %>%
+  arrange(dyade_recoded, tp_num)
 
 ################################################################################
 ############################# PLOT 1 - dyades ##################################
@@ -167,12 +205,12 @@ tsne_df_2d %<>%
 # quality or refine it, although i would really like to
 
 pal_dyades <- randomcoloR::distinctColorPalette(
-  length(unique(tsne_df_2d$dyade))
+  length(unique(tsne_df_2d$dyade_recoded))
 )
 
 ## without lines
 ggplot(tsne_df_2d, aes(tSNE1, tSNE2)) +
-  geom_point(aes(color = factor(dyade)),
+  geom_point(aes(color = factor(dyade_recoded)),
              size = 1.1,
              alpha = 0.65
   ) +
@@ -195,10 +233,10 @@ ggsave("results/tsne/tsne-01.png",
 
 # with lines
 ggplot(tsne_df_2d, aes(tSNE1, tSNE2)) +
-  geom_path(aes(group = dyade),
+  geom_path(aes(group = dyade_recoded),
             linewidth = 0.25, alpha = 0.25, show.legend = FALSE
   ) +
-  geom_point(aes(color = factor(dyade)),
+  geom_point(aes(color = factor(dyade_recoded)),
              size = 1.1,
              alpha = 0.65
   ) +
@@ -228,15 +266,15 @@ tp_map <- c(
 
 tsne3 <- tsne_df_3d %>%
   mutate(
-    tp_desc = dplyr::recode(timepoint_factor,
+    tp_desc = dplyr::recode(timepoint_recoded,
                             !!!tp_map,
-                            .default = timepoint_factor
+                            .default = timepoint_recoded
     ),
-    tp_ord = readr::parse_number(timepoint_factor), # 0..8 for ordering
+    tp_ord = readr::parse_number(timepoint_recoded), # 0..8 for ordering
     hover_text = paste0(
       "Group: ", big_group, "<br>",
-      "Timepoint: ", tp_desc, " (", timepoint_factor, ")<br>",
-      "Dyade: ", dyade, "<br>",
+      "Timepoint: ", tp_desc, " (", timepoint_recoded, ")<br>",
+      "Dyade: ", dyade_recoded, "<br>",
       "Subject: ", subject_id, "<br>",
       "tSNE1: ", sprintf("%.3f", tSNE1), "<br>",
       "tSNE2: ", sprintf("%.3f", tSNE2), "<br>",
@@ -246,8 +284,8 @@ tsne3 <- tsne_df_3d %>%
 
 # lines need rows ordered within each dyade; drop singleton dyades for lines
 lines_df <- tsne3 %>%
-  arrange(dyade, tp_ord) %>%
-  group_by(dyade) %>%
+  arrange(dyade_recoded, tp_ord) %>%
+  group_by(dyade_recoded) %>%
   filter(n() >= 2) %>%
   ungroup()
 
@@ -257,7 +295,7 @@ p <- plot_ly(
   x = ~tSNE1, y = ~tSNE2, z = ~tSNE3,
   type = "scatter3d", mode = "markers",
   marker = list(size = 6, opacity = 0.9),
-  color = ~ factor(dyade),
+  color = ~ factor(dyade_recoded),
   colors = pal_dyades,
   text = ~hover_text, hoverinfo = "text"
 ) %>%
@@ -271,7 +309,7 @@ p <- plot_ly(
     ),
     legend = list(title = list(text = "Dyade"))
   )
-htmlwidgets::saveWidget(p, "results/tsne/tsne3d-01.html", selfcontained = TRUE)
+htmlwidgets::saveWidget(p, "results/tsne/tsne3d-01.html", selfcontained = FALSE)
 
 # 2) 3D scatter with lines
 # points
@@ -280,7 +318,7 @@ p <- plot_ly(
   x = ~tSNE1, y = ~tSNE2, z = ~tSNE3,
   type = "scatter3d", mode = "markers",
   marker = list(size = 6, opacity = 0.9),
-  color = ~ factor(dyade),
+  color = ~ factor(dyade_recoded),
   colors = pal_dyades,
   text = ~hover_text, hoverinfo = "text",
   showlegend = FALSE
@@ -292,8 +330,8 @@ p <- add_trace(
   data = lines_df,
   x = ~tSNE1, y = ~tSNE2, z = ~tSNE3,
   type = "scatter3d", mode = "lines",
-  split = ~dyade, # <- this gets separate paths per dyade
-  color = ~ factor(dyade), colors = pal_dyades,
+  split = ~dyade_recoded, # <- this gets separate paths per dyade
+  color = ~ factor(dyade_recoded), colors = pal_dyades,
   opacity = 0.35,
   hoverinfo = "none",
   showlegend = FALSE
@@ -311,7 +349,7 @@ p <- layout(
   showlegend = FALSE
 )
 htmlwidgets::saveWidget(p, "results/tsne/tsne3d-01-lines.html",
-                        selfcontained = TRUE
+                        selfcontained = FALSE
 )
 
 # thomas wanted to check how the tsnes look like with the lines --> but imho the
@@ -362,7 +400,7 @@ p <- plot_ly(
     legend = list(title = list(text = "Group"))
   )
 p
-htmlwidgets::saveWidget(p, "results/tsne/tsne3d-02.html", selfcontained = TRUE)
+htmlwidgets::saveWidget(p, "results/tsne/tsne3d-02.html", selfcontained = FALSE)
 
 ################################################################################
 ############################# PLOT 3 - groups x time ###########################
@@ -418,10 +456,20 @@ lab_combo <- function(keys) {
 
 # build plot, using the new labeller for the legend labels
 df2 <- tsne_df_2d |>
-  mutate(combo = paste(big_group, timepoint_factor, sep = "__"))
+  mutate(combo = paste(big_group, timepoint_recoded, sep = "__"))
 
-ggplot(df2, aes(tSNE1, tSNE2)) +
-  geom_point(aes(color = combo), size = 0.8, alpha = 0.8) +
+p_combo <- ggplot(df2, aes(tSNE2, -tSNE1)) +
+  geom_point(
+    aes(
+      color = combo,
+      text = sprintf(
+        "Subject: %s\nDyade: %s\ntSNE1: %.3f\ntSNE2: %.3f\nGroup/Time: %s",
+        subject_id, dyade_recoded, tSNE1, tSNE2, combo
+      )
+    ),
+    size = 0.8,
+    alpha = 0.8
+  ) +
   scale_color_manual(
     breaks = names(combo_pal),
     labels = lab_combo(names(combo_pal)),
@@ -432,17 +480,29 @@ ggplot(df2, aes(tSNE1, tSNE2)) +
   theme_phip() +
   theme(
     legend.position = "top",
-    text = element_text(size = 37),
-    axis.title = element_text(size = 40),
-    axis.text = element_text(size = 35),
+    text = element_text(size = 15),
+    axis.title = element_text(size = 15),
+    axis.text = element_text(size = 15),
     legend.title.position = "top",
     legend.box.just = "left",
     legend.title.align = 0.5
   )
-
-ggsave("results/tsne/tsne-03.png",
+p_combo
+# static export
+ggsave("results/tsne/tsne-03_perp.svg",
+       plot = p_combo,
        bg = "white", dpi = 300,
        height = 15, width = 15, units = "cm"
+)
+
+# interactive Plotly version with hover info
+p_combo_plotly <- plotly::ggplotly(p_combo, tooltip = "text") %>%
+  plotly::layout(legend = list(title = list(text = "Group and Time")))
+
+htmlwidgets::saveWidget(
+  p_combo_plotly,
+  "results/tsne/tsne-03_perp.html",
+  selfcontained = FALSE
 )
 
 # identify siblings
@@ -480,13 +540,13 @@ pair_cols <- c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628")
 names(pair_cols) <- paste0("pair_", seq_along(pair_cols))
 
 # plotting: base points + highlighted pair points (different color per pair)
-ggplot(df2, aes(tSNE1, tSNE2)) +
+ggplot(df2, aes(tSNE2, -tSNE1)) +
   # base points colored by combo
   geom_point(aes(color = combo), size = 0.8, alpha = 0.8) +
   # highlighted pair points on top: filled circles, colored by pair_id
   geom_point(
     data = highlight_df,
-    aes(x = tSNE1, y = tSNE2, fill = pair_id),
+    aes(x = tSNE2, y = -tSNE1, fill = pair_id),
     shape = 21, colour = "black", stroke = 0.4,
     size = 4.5, show.legend = TRUE
   ) +
@@ -530,15 +590,15 @@ combo_colors_tbl <- tibble::tibble(
 
 # preparing data nad ensure required columns exist
 tsne31 <- tsne3 %>%
-  mutate(combo = paste(big_group, timepoint_factor, sep = "__")) %>%
+  mutate(combo = paste(big_group, timepoint_recoded, sep = "__")) %>%
   left_join(combo_colors_tbl, by = "combo") %>%
   mutate(
     # Human-readable label like "mom_serum - T0 (-7 m)"
     combo_label = paste0(
       big_group, " - ",
-      ifelse(timepoint_factor %in% names(tp_label_map),
-             tp_label_map[timepoint_factor],
-             timepoint_factor
+      ifelse(timepoint_recoded %in% names(tp_label_map),
+             tp_label_map[timepoint_recoded],
+             timepoint_recoded
       )
     )
   )
@@ -596,7 +656,7 @@ p <- plot_ly(
     legend = list(title = list(text = "tSNE 3D - Group x Time"))
   )
 
-htmlwidgets::saveWidget(p, "results/tsne/tsne3d-03.html", selfcontained = TRUE)
+htmlwidgets::saveWidget(p, "results/tsne/tsne3d-03.html", selfcontained = FALSE)
 
 
 ################################################################################
@@ -613,22 +673,12 @@ htmlwidgets::saveWidget(p, "results/tsne/tsne3d-03.html", selfcontained = TRUE)
 stopifnot(identical(rownames(D), colnames(D))) # must be square
 
 nms <- rownames(D)
-parts <- do.call(rbind, strsplit(nms, "__", fixed = TRUE))
-colnames(parts) <- c("subject_id", "big_group", "timepoint_factor", "dyade")
-meta <- as.data.frame(parts, stringsAsFactors = FALSE)
+meta <- parsed
 
 idx <- meta$big_group == "kid_serum"
 D_kid <- D[idx, idx, drop = FALSE]
 
-# parse "subject_id__big_group__timepoint_factor__dyade"
-parts_kid <- stringr::str_split_fixed(nms, "__", 4)
-parsed_kid <- tibble(
-  id_full          = nms[idx],
-  subject_id       = parts[idx, 1],
-  big_group        = parts[idx, 2],
-  timepoint_factor = parts[idx, 3],
-  dyade            = parts[idx, 4]
-)
+parsed_kid <- meta[idx, ]
 
 ## ------------------- tSNE ------------------------------------
 # seed for reproducibility
@@ -758,7 +808,7 @@ p <- plot_ly(
   )
 
 # save
-htmlwidgets::saveWidget(p, "results/tsne/tsne3d-04.html", selfcontained = TRUE)
+htmlwidgets::saveWidget(p, "results/tsne/tsne3d-04.html", selfcontained = FALSE)
 
 make_tsne_plots <- function(
     df2d,
@@ -828,7 +878,7 @@ make_tsne_plots <- function(
     p3d
   }
 
-  htmlwidgets::saveWidget(p3d, widget_path, selfcontained = TRUE)
+  htmlwidgets::saveWidget(p3d, widget_path, selfcontained = FALSE)
 }
 
 ################################################################################
@@ -998,7 +1048,7 @@ p3d <- plot_ly(
 
 p3d
 htmlwidgets::saveWidget(p3d, "results/tsne/tsne3d-06.html",
-                        selfcontained = TRUE
+                        selfcontained = FALSE
 )
 
 ################################################################################
@@ -1094,7 +1144,7 @@ p3d <- plot_ly(
 
 p3d
 htmlwidgets::saveWidget(p3d, "results/tsne/tsne3d-07.html",
-                        selfcontained = TRUE
+                        selfcontained = FALSE
 )
 
 ################################################################################
@@ -1197,7 +1247,7 @@ p3d <- plot_ly(
 
 p3d
 htmlwidgets::saveWidget(p3d, "results/tsne/tsne3d-08.html",
-                        selfcontained = TRUE
+                        selfcontained = FALSE
 )
 
 
@@ -1293,7 +1343,7 @@ p3d <- plot_ly(
 
 p3d
 htmlwidgets::saveWidget(p3d, "results/tsne/tsne3d-09.html",
-                        selfcontained = TRUE
+                        selfcontained = FALSE
 )
 
 
@@ -1405,7 +1455,7 @@ p3d <- plot_ly(
 
 p3d
 htmlwidgets::saveWidget(p3d, "results/tsne/tsne3d-10.html",
-                        selfcontained = TRUE
+                        selfcontained = FALSE
 )
 
 ################################################################################
@@ -1505,7 +1555,7 @@ p3d <- plot_ly(
 
 p3d
 htmlwidgets::saveWidget(p3d, "results/tsne/tsne3d-11.html",
-                        selfcontained = TRUE
+                        selfcontained = FALSE
 )
 
 
@@ -1519,20 +1569,18 @@ stopifnot(identical(rownames(Dm), colnames(Dm))) # must be square
 
 ## 1) Parse names and index kid_serum @ T8
 nms <- rownames(Dm)
-parts <- str_split_fixed(nms, "__", 4)
-colnames(parts) <- c("subject_id", "big_group", "timepoint_factor", "dyade")
-meta <- as.data.frame(parts, stringsAsFactors = FALSE)
+meta <- parsed
 
 idx_T8 <- meta$big_group == "kid_serum" & meta$timepoint_factor == "T8"
 
 D_kid_T8 <- Dm[idx_T8, idx_T8, drop = FALSE]
 
 parsed_kid_T8 <- tibble(
-  id_full          = nms[idx_T8],
-  subject_id       = parts[idx_T8, 1],
-  big_group        = parts[idx_T8, 2],
-  timepoint_factor = parts[idx_T8, 3],
-  dyade            = parts[idx_T8, 4]
+  id_full          = meta$id_full[idx_T8],
+  subject_id       = meta$subject_id[idx_T8],
+  big_group        = meta$big_group[idx_T8],
+  timepoint_factor = meta$timepoint_factor[idx_T8],
+  dyade            = meta$dyade[idx_T8]
 )
 
 ## 2) t-SNE (safe perplexity for subset size)
@@ -1660,7 +1708,7 @@ p12_3d <- plot_ly(
   ),
   legend = list(title = list(text = "Feeding at birth"))
 )
-saveWidget(p12_3d, "results/tsne/tsne3d-12.html", selfcontained = TRUE)
+saveWidget(p12_3d, "results/tsne/tsne3d-12.html", selfcontained = FALSE)
 
 
 ################################################################################
@@ -1731,7 +1779,7 @@ p13_3d <- plot_ly(
   ),
   legend = list(title = list(text = "Infant sex"))
 )
-saveWidget(p13_3d, "results/tsne/tsne3d-13.html", selfcontained = TRUE)
+saveWidget(p13_3d, "results/tsne/tsne3d-13.html", selfcontained = FALSE)
 
 
 ################################################################################
@@ -1817,7 +1865,7 @@ p14_3d <- plot_ly(
   ),
   legend = list(title = list(text = "Feeding at 3 mo"))
 )
-saveWidget(p14_3d, "results/tsne/tsne3d-14.html", selfcontained = TRUE)
+saveWidget(p14_3d, "results/tsne/tsne3d-14.html", selfcontained = FALSE)
 
 
 ################################################################################
@@ -1893,7 +1941,7 @@ p15_3d <- plot_ly(
   ),
   legend = list(title = list(text = "Smoking"))
 )
-saveWidget(p15_3d, "results/tsne/tsne3d-15.html", selfcontained = TRUE)
+saveWidget(p15_3d, "results/tsne/tsne3d-15.html", selfcontained = FALSE)
 
 ################################################################################
 ############################# PLOT 16 - parity (T8) ############################
@@ -1985,7 +2033,7 @@ p16_3d <- plot_ly(
   ),
   legend = list(title = list(text = "Parity"))
 )
-saveWidget(p16_3d, "results/tsne/tsne3d-16.html", selfcontained = TRUE)
+saveWidget(p16_3d, "results/tsne/tsne3d-16.html", selfcontained = FALSE)
 
 
 ################################################################################
@@ -2069,7 +2117,7 @@ p17_3d <- plot_ly(
   ),
   legend = list(title = list(text = "Delivery place"))
 )
-saveWidget(p17_3d, "results/tsne/tsne3d-17.html", selfcontained = TRUE)
+saveWidget(p17_3d, "results/tsne/tsne3d-17.html", selfcontained = FALSE)
 
 ## remove vars and clean
 rm(

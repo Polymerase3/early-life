@@ -64,12 +64,15 @@ withr::with_preserve_seed({
   )
 })
 
+ps$data_long <- ps$data_long %>%
+  dplyr::mutate_if(is.logical, as.integer)
+
 # create base results directory and save peptide library
 dir.create("results", recursive = TRUE, showWarnings = FALSE)
 get_peptide_library(ps) %>%
   collect() %>%
-  as.data.frame() %>%
-  saveRDS(file = "results/peptide_library.rds")
+  as.data.frame() -> peplib_global
+saveRDS(peplib_global, file = "results/peptide_library.rds")
 
 # define list of comparisons and longitudinal flags
 source("R/zzz.R")
@@ -87,22 +90,25 @@ if (!is.null(CMP_KEY) && !is.na(CMP_INDEX)) {
 }
 
 if (!is.null(CMP_KEY)) {
-  cmp_keys <- vapply(comparisons, paste, collapse = "|", FUN.VALUE = character(1))
+  cmp_keys <- vapply(comparisons2, paste, collapse = "|", FUN.VALUE = character(1))
   match_idx <- match(CMP_KEY, cmp_keys)
   if (is.na(match_idx)) {
-    stop("CMP_KEY not found in comparisons list: ", CMP_KEY)
+    stop("CMP_KEY not found in comparisons2 list: ", CMP_KEY)
   }
-  comparisons <- list(comparisons[[match_idx]])
+  comparisons2 <- list(comparisons2[[match_idx]])
+  longitudinal2 <- longitudinal2[match_idx]
 } else if (!is.na(CMP_INDEX)) {
-  if (CMP_INDEX < 1L || CMP_INDEX > length(comparisons)) {
-    stop("CMP_INDEX out of range: ", CMP_INDEX, " (1..", length(comparisons), ")")
+  if (CMP_INDEX < 1L || CMP_INDEX > length(comparisons2)) {
+    stop("CMP_INDEX out of range: ", CMP_INDEX, " (1..", length(comparisons2), ")")
   }
-  comparisons <- list(comparisons[[CMP_INDEX]])
+  comparisons2 <- list(comparisons2[[CMP_INDEX]])
+  longitudinal2 <- longitudinal2[CMP_INDEX]
 }
 
 paired_subject_comparisons <- list(
   c("mom_serum_T0", "mom_serum_T1"),
   c("mom_serum_T0", "mom_serum_T2"),
+  c("mom_serum_T1", "mom_serum_T2"),
   c("kid_serum_T2", "kid_serum_T6"),
   c("kid_serum_T2", "kid_serum_T8"),
   c("kid_serum_T6", "kid_serum_T8"),
@@ -113,8 +119,17 @@ paired_subject_comparisons <- list(
 
 paired_dyade_comparisons <- list(
   c("mom_serum_T2", "kid_serum_T2"),
+  c("mom_kid_serum_T2", "kid_serum_T6"),
+  c("mom_kid_serum_T2", "kid_serum_T8"),
+  c("mom_serum_T2", "mom_milk_T4"),
+  c("mom_serum_T2", "mom_milk_T6"),
+  c("mom_serum_T2", "mom_milk_T7"),
+  c("kid_serum_T6", "mom_milk_T4"),
   c("kid_serum_T6", "mom_milk_T6"),
-  c("kid_serum_T8", "mom_milk_T8")
+  c("kid_serum_T6", "mom_milk_T7"),
+  c("kid_serum_T8", "mom_milk_T4"),
+  c("kid_serum_T8", "mom_milk_T8"),
+  c("kid_serum_T8", "mom_milk_T7")
 )
 
 paired_subject_keys <- vapply(paired_subject_comparisons, paste, collapse = "|", FUN.VALUE = character(1))
@@ -161,9 +176,11 @@ if (.Platform$OS.type == "windows") {
 }
 
 # loop through each comparison and perform the same analysis
-for (cmp in comparisons) {
+for (cmp_idx in seq_along(comparisons2)) {
+  cmp <- comparisons2[[cmp_idx]]
   var1 <- cmp[1]
   var2 <- cmp[2]
+  is_longitudinal <- isTRUE(longitudinal2[cmp_idx])
   message("Running comparison: ", var1, " vs ", var2)
   label_dir <- paste(var1, "vs", var2, sep = "_")
   cmp_key <- paste(var1, var2, sep = "|")
@@ -174,29 +191,30 @@ for (cmp in comparisons) {
   } else {
     NULL
   }
-  use_and_filter <- cmp_key %in% paired_dyade_keys
-
   # create output directory for this comparison
   out_dir <- file.path("results", label_dir)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-  # filter data for the two groups and add grouping columns
+  # filter data for the two groups (always OR), then, if paired, keep only IDs with both groups
   ps_cmp <- ps %>%
-    filter(if (use_and_filter) {
-      (!!sym(var1) == 1L) & (!!sym(var2) == 1L)
-    } else {
-      (!!sym(var1) == 1L) | (!!sym(var2) == 1L)
-    }) %>%
+    filter((!!sym(var1) == 1L) | (!!sym(var2) == 1L)) %>%
     mutate(
       group_char  = if_else(!!sym(var1) == 1L, var1, var2),
       group_dummy = if_else(!!sym(var1) == 1L, 1L, 0L)
     )
 
-  # save the filtered dataset for this comparison
+  if (!is.null(paired_col)) {
+    ps_cmp <- ps_cmp %>%
+      group_by(!!sym(paired_col)) %>%
+      filter(any(!!sym(var1) == 1L) & any(!!sym(var2) == 1L)) %>%
+      ungroup()
+  }
+
+  # save the filtered dataset for this comparison (keep both pairing candidates)
   make_and_save(
-    data     = ps_cmp,
-    out_path = file.path(out_dir, paste0(label_dir, "_data.rds")),
-    extra_vars = paired_col
+    data       = ps_cmp,
+    out_path   = file.path(out_dir, paste0(label_dir, "_data.rds")),
+    extra_vars = unique(c(paired_col, "subject_id", "dyade_recoded"))
   )
 
   # ------------------ enrichment counts ------------------
@@ -229,7 +247,7 @@ for (cmp in comparisons) {
   dist_bc <- phiper:::compute_distance(ps_cmp,
     value_col = "exist",
     method_normalization = "hellinger",
-    distance = "bray", n_threads = 10
+    distance = "kulczynski", n_threads = 10
   )
   dir.create(file.path(out_dir, "beta_diversity"), recursive = TRUE, showWarnings = FALSE)
   dist_mat <- as.matrix(dist_bc)
@@ -248,28 +266,63 @@ for (cmp in comparisons) {
   saveRDS(disp_res, file.path(out_dir, "beta_diversity", "dispersion_results.rds"))
   print(disp_res)
 
-  tsne_res <- phiper:::compute_tsne(
-    ps = ps_cmp, dist_obj = dist_bc, dims = 2L,
-    perplexity = 15, meta_cols = c("group_char")
-  )
-  openxlsx::write.xlsx(tsne_res, file = file.path(out_dir, "beta_diversity", "tsne2d_results.xlsx"), rowNames = TRUE)
+  n_samples <- nrow(dist_mat)
+  tsne_perp <- function(default_p, n) {
+    if (is.na(n) || n < 3L) return(NA_integer_)
+    p <- min(as.integer(default_p), as.integer(n) - 1L)
+    p <- max(2L, p)
+    if (p >= n) return(NA_integer_)
+    p
+  }
 
-  CairoSVG(file.path(out_dir, "beta_diversity", "tsne2d_plot.svg"),
-    dpi = 300,
-    height = 30, width = 30, unit = "cm", bg = "white"
-  )
-  p_tsne2d <- phiper:::plot_tsne(tsne_res, view = "2d", colour = "group_char", palette = c("blue", "green"))
-  print(p_tsne2d)
-  dev.off()
+  # 2D t-SNE (adaptive perplexity; skip gracefully for tiny n)
+  p2 <- tsne_perp(15L, n_samples)
+  if (!is.na(p2)) {
+    tsne_res2d <- tryCatch(
+      phiper:::compute_tsne(
+        ps = ps_cmp, dist_obj = dist_bc, dims = 2L,
+        perplexity = p2, meta_cols = c("group_char")
+      ),
+      error = function(e) {
+        message("Skipping 2D t-SNE for ", var1, " vs ", var2, ": ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (!is.null(tsne_res2d)) {
+      openxlsx::write.xlsx(tsne_res2d, file = file.path(out_dir, "beta_diversity", "tsne2d_results.xlsx"), rowNames = TRUE)
+      CairoSVG(file.path(out_dir, "beta_diversity", "tsne2d_plot.svg"),
+        dpi = 300,
+        height = 30, width = 30, unit = "cm", bg = "white"
+      )
+      p_tsne2d <- phiper:::plot_tsne(tsne_res2d, view = "2d", colour = "group_char", palette = c("blue", "green"))
+      print(p_tsne2d)
+      dev.off()
+    }
+  } else {
+    message("Skipping 2D t-SNE for ", var1, " vs ", var2, ": too few samples (n=", n_samples, ").")
+  }
 
-  tsne_res <- phiper:::compute_tsne(
-    ps = ps_cmp, dist_obj = dist_bc, dims = 3L,
-    perplexity = 20, meta_cols = c("group_char")
-  )
-  openxlsx::write.xlsx(tsne_res, file = file.path(out_dir, "beta_diversity", "tsne3d_results.xlsx"), rowNames = TRUE)
-
-  p3d <- phiper:::plot_tsne(tsne_res, view = "3d", colour = "group_char", palette = c("blue", "green"))
-  htmlwidgets::saveWidget(p3d, file = file.path(out_dir, "beta_diversity", "tsne3d_plot.html"), selfcontained = TRUE)
+  # 3D t-SNE (adaptive perplexity; requires at least 4 samples)
+  p3 <- if (n_samples >= 4L) tsne_perp(20L, n_samples) else NA_integer_
+  if (!is.na(p3)) {
+    tsne_res3d <- tryCatch(
+      phiper:::compute_tsne(
+        ps = ps_cmp, dist_obj = dist_bc, dims = 3L,
+        perplexity = p3, meta_cols = c("group_char")
+      ),
+      error = function(e) {
+        message("Skipping 3D t-SNE for ", var1, " vs ", var2, ": ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (!is.null(tsne_res3d)) {
+      openxlsx::write.xlsx(tsne_res3d, file = file.path(out_dir, "beta_diversity", "tsne3d_results.xlsx"), rowNames = TRUE)
+      p3d <- phiper:::plot_tsne(tsne_res3d, view = "3d", colour = "group_char", palette = c("blue", "green"))
+      htmlwidgets::saveWidget(p3d, file = file.path(out_dir, "beta_diversity", "tsne3d_plot.html"), selfcontained = FALSE)
+    }
+  } else {
+    message("Skipping 3D t-SNE for ", var1, " vs ", var2, ": too few samples (n=", n_samples, ").")
+  }
 
   # add group information to PCoA sample coordinates
   pcoa_res$sample_coords <- pcoa_res$sample_coords %>%
@@ -338,7 +391,7 @@ for (cmp in comparisons) {
 
   # ------------------ POP framework ----------------------
   data_frameworks <- readRDS(file.path(out_dir, paste0(label_dir, "_data.rds")))
-  peplib <- readRDS(file.path("results", "peptide_library.rds"))
+  peplib <- peplib_global
 
   extract_tbl <- function(obj) {
     if (is.data.frame(obj)) {
@@ -360,14 +413,29 @@ for (cmp in comparisons) {
     stop("Cannot extract a data table from the POP result object.")
   }
 
+  downsample_for_static <- function(df, prop = 1, seed = 1L) {
+    if (is.null(df) || !nrow(df)) {
+      return(df)
+    }
+    n <- nrow(df)
+    size <- max(1L, floor(n * prop))
+    if (size >= n) {
+      return(df)
+    }
+    set.seed(seed)
+    dplyr::slice_sample(df, n = size)
+  }
+
   dir.create(file.path(out_dir, "POP_framework"), recursive = TRUE, showWarnings = FALSE)
+
+  paired_prev <- if (is_longitudinal && !is.null(paired_col)) paired_col else FALSE
 
   prev_res_pep <- phiper::ph_prevalence_compare(
     x                 = data_frameworks,
     group_cols        = "group_char",
     rank_cols         = "peptide_id",
     compute_ratios_db = TRUE,
-    paired            = paired_col,
+    paired            = paired_prev,
     parallel          = TRUE,
     collect           = TRUE
   )
@@ -380,7 +448,7 @@ for (cmp in comparisons) {
     group_cols        = "group_char",
     rank_cols         = ranks_tax,
     compute_ratios_db = FALSE,
-    paired            = paired_col,
+    paired            = paired_prev,
     parallel          = TRUE,
     peptide_library   = peplib,
     collect           = TRUE
@@ -400,8 +468,9 @@ for (cmp in comparisons) {
     } else {
       rank_tbl %>% filter(rank == rank_chr)
     }
+    df_rank_static <- downsample_for_static(df_rank, prop = 1, seed = 1L)
     p_static <- scatter_static(
-      df = df_rank,
+      df = df_rank_static,
       rank = rank_chr,
       xlab = df_rank$group1[1],
       ylab = df_rank$group2[1],
@@ -418,7 +487,8 @@ for (cmp in comparisons) {
       )
     ggsave(paste0(out_name, "_static.svg"), p_static,
       dpi = 300,
-      height = 30, width = 30, unit = "cm", bg = "white"
+      height = 30, width = 30, unit = "cm", bg = "white",
+      device = Cairo::CairoSVG
     )
 
     p_inter <- scatter_interactive(
@@ -444,7 +514,7 @@ for (cmp in comparisons) {
     htmlwidgets::saveWidget(
       p_inter,
       file = paste0(out_name, "_interactive.html"),
-      selfcontained = TRUE
+      selfcontained = FALSE
     )
   }
 
@@ -457,6 +527,13 @@ for (cmp in comparisons) {
   } else {
     LOG_FILE
   }
+
+  stat_mode <- if (is_longitudinal) {
+    "srlr_paired"
+  } else {
+    "srlr"
+  }
+  paired_by <- if (is_longitudinal) paired_col else NULL
 
   res <- phiper::compute_delta(
     x = data_frameworks,
@@ -474,12 +551,8 @@ for (cmp in comparisons) {
     group_cols = "group_char",
     peptide_library = peplib,
     B_permutations = 150000L,
-    smooth_eps_num = 0.5,
-    smooth_eps_den_mult = 2.0,
-    min_max_prev = 0.0,
-    weight_mode = "n_eff_sqrt",
-    stat_mode = "asin",
-    prev_strat = "none",
+    weight_mode = "equal",
+    stat_mode = stat_mode,
     winsor_z = Inf,
     rank_feature_keep = list(
       phylum = NULL, class = NULL, order = NULL, family = NULL, genus = NULL, species = NULL,
@@ -489,9 +562,7 @@ for (cmp in comparisons) {
     ),
     log = LOG,
     log_file = log_file_current,
-    fold_change = "sum",
-    cross_prev = "mean",
-    paired_by = paired_col
+    paired_by = paired_by
   )
   res <- as.data.frame(res)
 
@@ -520,26 +591,6 @@ for (cmp in comparisons) {
   print(p_forest_unc)
   dev.off()
 
-  CairoSVG(file.path(out_dir, "DELTA_framework", "BHcorrected_significant_static_forestplot.svg"),
-    dpi = 300,
-    height = 30, width = 30, unit = "cm", bg = "white"
-  )
-  p_forest_bh <- phiper::forestplot(
-    results_tbl = res,
-    rank_of_interest = "all",
-    use_diverging_colors = TRUE,
-    filter_significant = "p_adj_rank",
-    sig_level = 0.10,
-    left_label = paste0("More in ", df_rank$group1[1]),
-    right_label = paste0("More in ", df_rank$group2[1]),
-    label_vjust = -0.9,
-    y_pad = 0.3,
-    label_x_gap_frac = -0.3,
-    statistic_to_plot = "T_stand"
-  )
-  print(p_forest_bh)
-  dev.off()
-
   p_inter <- phiper::forestplot_interactive(
     results_tbl = res,
     rank_of_interest = "all",
@@ -555,30 +606,12 @@ for (cmp in comparisons) {
   htmlwidgets::saveWidget(
     p_inter,
     file = file.path(out_dir, "DELTA_framework", "uncorrected_significant_interactive_forestplot.html"),
-    selfcontained = TRUE
+    selfcontained = FALSE
   )
 
-  p_inter <- phiper::forestplot_interactive(
-    results_tbl = res,
-    rank_of_interest = "all",
-    statistic_to_plot = "T_stand",
-    filter_significant = "p_adj_rank",
-    sig_level = 0.10,
-    use_diverging_colors = TRUE,
-    left_label = paste0("More in ", df_rank$group1[1]),
-    right_label = paste0("More in ", df_rank$group2[1]),
-    arrow_length_frac = 0.35,
-    label_x_gap_frac = -0.3,
-    label_y_offset = -0.9
-  )$plot
-  htmlwidgets::saveWidget(
-    p_inter,
-    file = file.path(out_dir, "DELTA_framework", "BHcorrected_significant_interactive_forestplot.html"),
-    selfcontained = TRUE
-  )
   # ------------------ plot interesting features ---------
   # Always include these features in the "interesting" set (even if not significant)
-  always_keep <- c("Homo sapiens", "is_auto")
+  always_keep <- c("")
 
   res_filtered <- res %>%
     dplyr::mutate(
@@ -589,8 +622,7 @@ for (cmp in comparisons) {
     ) %>%
     dplyr::arrange(
       dplyr::desc(.force_keep), # optional: keep forced ones at the top
-      dplyr::desc(.data$T_obs_stand),
-      dplyr::desc(.data$cross_prev_mean)
+      dplyr::desc(.data$T_obs_stand)
     ) %>%
     dplyr::select(-.force_keep)
 
@@ -707,13 +739,16 @@ for (cmp in comparisons) {
       }
     }
 
+    feature_data_static <- downsample_for_static(feature_data, prop = 1, seed = 1L)
+    bg_df_static <- downsample_for_static(bg_df, prop = 1, seed = BG_SEED)
+
     ## ---------------- SCATTER STATIC ----------------
     CairoSVG(paste0(scatter_prefix, "_scatter_static.svg"),
       dpi = 300,
       height = 30, width = 30, unit = "cm", bg = "white"
     )
     p_scatter <- scatter_static(
-      df = feature_data,
+      df = feature_data_static,
       xlab = group1,
       ylab = group2,
       point_size = 2,
@@ -732,7 +767,7 @@ for (cmp in comparisons) {
 
     p_scatter <- add_background_static(
       p_scatter,
-      bg = bg_df,
+      bg = bg_df_static,
       size = 1,
       alpha = 0.35
     )
@@ -786,7 +821,7 @@ for (cmp in comparisons) {
     htmlwidgets::saveWidget(
       p_inter,
       file = paste0(file_prefix, "_scatter_interactive.html"),
-      selfcontained = TRUE
+      selfcontained = FALSE
     )
 
     ## ---------------- DELTA PLOT: conditional smooth ----------------
@@ -831,34 +866,34 @@ for (cmp in comparisons) {
     dev.off()
 
     ## ---------------- DELTA PLOT INTERACTIVE ----------------
-    p_delta <- tryCatch(
-      deltaplot_interactive(
-        prev_tbl            = feature_data,
-        group_pair_values   = c(group1, group2),
-        group_labels        = c(group1, group2),
-        point_alpha         = 0.6,
-        point_size          = 6,
-        add_smooth          = use_smooth,
-        smooth_k            = smooth_k,
-        arrow_length_frac   = 0.35, # old arrow_frac_h
-        point_jitter_width  = 0.01,
-        point_jitter_height = 0.01
-      ),
-      error = function(e) {
-        message(
-          "Delta interactive plot failed for ", feature_name,
-          " (", group1, " vs ", group2, "): ", conditionMessage(e)
-        )
-        NULL
-      }
-    )
-    if (!is.null(p_delta)) {
-      htmlwidgets::saveWidget(
-        p_delta,
-        file = paste0(file_prefix, "_deltaplot_interactive.html"),
-        selfcontained = TRUE
-      )
-    }
+    # p_delta <- tryCatch(
+    #   deltaplot_interactive(
+    #     prev_tbl            = feature_data,
+    #     group_pair_values   = c(group1, group2),
+    #     group_labels        = c(group1, group2),
+    #     point_alpha         = 0.6,
+    #     point_size          = 6,
+    #     add_smooth          = use_smooth,
+    #     smooth_k            = smooth_k,
+    #     arrow_length_frac   = 0.35, # old arrow_frac_h
+    #     point_jitter_width  = 0.01,
+    #     point_jitter_height = 0.01
+    #   ),
+    #   error = function(e) {
+    #     message(
+    #       "Delta interactive plot failed for ", feature_name,
+    #       " (", group1, " vs ", group2, "): ", conditionMessage(e)
+    #     )
+    #     NULL
+    #   }
+    # )
+    # if (!is.null(p_delta)) {
+    #   htmlwidgets::saveWidget(
+    #     p_delta,
+    #     file = paste0(file_prefix, "_deltaplot_interactive.html"),
+    #     selfcontained = FALSE
+    #   )
+    # }
 
     ## ---------------- ECDF STATIC ----------------
     CairoSVG(paste0(file_prefix, "_ecdfplot_static.svg"),
@@ -895,31 +930,31 @@ for (cmp in comparisons) {
     dev.off()
 
     ## ---------------- ECDF INTERACTIVE ----------------
-    p_ecdf <- tryCatch(
-      ecdf_plot_interactive(
-        prev_tbl            = feature_data,
-        group_pair_values   = c(group1, group2),
-        group_labels        = c(group1, group2),
-        line_width_px       = 2,
-        line_alpha          = 1,
-        show_median_lines   = TRUE,
-        show_ks_test        = TRUE
-      ),
-      error = function(e) {
-        message(
-          "ECDF interactive plot failed for ", feature_name,
-          " (", group1, " vs ", group2, "): ", conditionMessage(e)
-        )
-        NULL
-      }
-    )
-    if (!is.null(p_ecdf)) {
-      htmlwidgets::saveWidget(
-        p_ecdf,
-        file = paste0(file_prefix, "_ecdfplot_interactive.html"),
-        selfcontained = TRUE
-      )
-    }
+    # p_ecdf <- tryCatch(
+    #   ecdf_plot_interactive(
+    #     prev_tbl            = feature_data,
+    #     group_pair_values   = c(group1, group2),
+    #     group_labels        = c(group1, group2),
+    #     line_width_px       = 2,
+    #     line_alpha          = 1,
+    #     show_median_lines   = TRUE,
+    #     show_ks_test        = TRUE
+    #   ),
+    #   error = function(e) {
+    #     message(
+    #       "ECDF interactive plot failed for ", feature_name,
+    #       " (", group1, " vs ", group2, "): ", conditionMessage(e)
+    #     )
+    #     NULL
+    #   }
+    # )
+    # if (!is.null(p_ecdf)) {
+    #   htmlwidgets::saveWidget(
+    #     p_ecdf,
+    #     file = paste0(file_prefix, "_ecdfplot_interactive.html"),
+    #     selfcontained = FALSE
+    #   )
+    # }
 
     invisible(NULL)
   }
