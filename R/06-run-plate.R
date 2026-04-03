@@ -31,6 +31,9 @@ withr::with_preserve_seed({
   )
 })
 
+# extract peptide library for interactive plot tooltips
+peplib <- phiper::get_peptide_library(ps) %>% dplyr::collect() %>% as.data.frame()
+
 # =============================================================================
 # 2) case table
 # =============================================================================
@@ -527,8 +530,6 @@ run_pairs <- list(
   c("R26", "R27")
 )
 
-pop_plots <- list()
-
 for (pair in run_pairs) {
   pair_label <- paste(pair, collapse = "_vs_")
 
@@ -565,20 +566,17 @@ for (pair in run_pairs) {
   sampled_peptides <- prev_tbl %>%
     dplyr::mutate(
       .rand = dbplyr::sql("random()"),
-      sample_rate = dplyr::case_when(
-        .data$prev_bin == "0-10" ~ 0.10,
-        .data$prev_bin == "10-20" ~ 0.10,
-        TRUE ~ 1
-      )
+      sample_rate = 1
     ) %>%
     dplyr::group_by(.data$prev_bin) %>%
     dplyr::filter(.data$.rand < .data$sample_rate) %>%
     dplyr::ungroup() %>%
     dplyr::select(.data$peptide_id)
 
-  # create a binary group column for the pair (collect to data.frame)
+  # collect only the columns needed for prevalence comparison
   data_frameworks <- base_tbl %>%
     dplyr::semi_join(sampled_peptides, by = "peptide_id") %>%
+    dplyr::select("sample_id", "peptide_id", "run_id", "exist") %>%
     dplyr::collect() %>%
     dplyr::mutate(group_char = dplyr::if_else(.data$run_id == pair[1], pair[1], pair[2]))
 
@@ -591,7 +589,10 @@ for (pair in run_pairs) {
     parallel          = TRUE,
     collect           = TRUE
   )
+  rm(data_frameworks)
+
   pep_tbl <- extract_tbl(prev_res_pep)
+  rm(prev_res_pep)
 
   p_static <- phiper::scatter_static(
     df = pep_tbl,
@@ -613,8 +614,6 @@ for (pair in run_pairs) {
       legend.key.size = grid::unit(1.2, "cm")
     )
 
-  pop_plots[[pair_label]] <- p_static
-
   ggsave(
     filename = file.path(pop_dir, paste0(pair_label, "_static.svg")),
     plot = p_static,
@@ -624,4 +623,32 @@ for (pair in run_pairs) {
     units = "cm",
     bg = "white"
   )
+  rm(p_static)
+
+  p_inter <- phiper::scatter_interactive(
+    df = pep_tbl,
+    rank = "peptide_id",
+    xlab = pep_tbl$group1[1],
+    ylab = pep_tbl$group2[1],
+    peplib = peplib,
+    point_size = 10,
+    jitter_width_pp = 0.25,
+    jitter_height_pp = 0.25,
+    point_alpha = 0.85,
+    font_size = 12
+  )
+  p_inter <- plotly::layout(
+    p_inter,
+    autosize = TRUE,
+    margin   = list(l = 70, r = 30, t = 10, b = 70),
+    xaxis    = list(range = c(-2, 102), automargin = TRUE),
+    yaxis    = list(range = c(-2, 102), automargin = TRUE)
+  )
+  htmlwidgets::saveWidget(
+    p_inter,
+    file = file.path(pop_dir, paste0(pair_label, "_interactive.html")),
+    selfcontained = TRUE
+  )
+  rm(p_inter, pep_tbl)
+  gc()
 }

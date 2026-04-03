@@ -67,7 +67,7 @@ withr::with_preserve_seed({
 })
 
 ## source helper functions from other file to not overcrowd this one
-source("R/99-utils.R")
+source("R/25-utils.R")
 
 ## cave! the code here is extremely repetitive and i know it - i simply didn't
 ## have time to deal with the issue + it works
@@ -674,6 +674,8 @@ stopifnot(identical(rownames(D), colnames(D))) # must be square
 
 nms <- rownames(D)
 meta <- parsed
+meta_kids <- readRDS("data/metas_clean.rds")
+colnames(meta_kids)[1] = "subject_id"
 
 idx <- meta$big_group == "kid_serum"
 D_kid <- D[idx, idx, drop = FALSE]
@@ -711,7 +713,7 @@ tsne_df_2d_kid <- parsed_kid %>%
     tSNE1 = ts2_kid$Y[, 1],
     tSNE2 = ts2_kid$Y[, 2]
   ) %>%
-  left_join(select(meta_kids, -dyade), by = "subject_id")
+  left_join(meta_kids, by = "subject_id")
 saveRDS(tsne_df_2d_kid, "results/tsne/data/kids_only_tsne2d.rds")
 
 tsne_df_3d_kid <- parsed_kid %>%
@@ -720,7 +722,7 @@ tsne_df_3d_kid <- parsed_kid %>%
     tSNE2 = ts3_kid$Y[, 2],
     tSNE3 = ts3_kid$Y[, 3]
   ) %>%
-  left_join(select(meta_kids, -dyade), by = "subject_id")
+  left_join(meta_kids, by = "subject_id")
 saveRDS(tsne_df_3d_kid, "results/tsne/data/kids_only_tsne3d.rds")
 
 ## 2d plot -------
@@ -1571,7 +1573,7 @@ stopifnot(identical(rownames(Dm), colnames(Dm))) # must be square
 nms <- rownames(Dm)
 meta <- parsed
 
-idx_T8 <- meta$big_group == "kid_serum" & meta$timepoint_factor == "T8"
+idx_T8 <- meta$big_group == "kid_serum" & meta$timepoint_recoded == "T8"
 
 D_kid_T8 <- Dm[idx_T8, idx_T8, drop = FALSE]
 
@@ -1579,8 +1581,8 @@ parsed_kid_T8 <- tibble(
   id_full          = meta$id_full[idx_T8],
   subject_id       = meta$subject_id[idx_T8],
   big_group        = meta$big_group[idx_T8],
-  timepoint_factor = meta$timepoint_factor[idx_T8],
-  dyade            = meta$dyade[idx_T8]
+  timepoint_factor = meta$timepoint_recoded[idx_T8],
+  dyade            = meta$dyade_recoded[idx_T8]
 )
 
 ## 2) t-SNE (safe perplexity for subset size)
@@ -1610,7 +1612,7 @@ tsne_df_2d_kid_T8 <- parsed_kid_T8 %>%
     tSNE1 = ts2_kid_T8$Y[, 1],
     tSNE2 = ts2_kid_T8$Y[, 2]
   ) %>%
-  left_join(select(meta_kids, -dyade), by = "subject_id")
+  left_join(meta_kids, by = "subject_id")
 saveRDS(tsne_df_2d_kid_T8, "results/tsne/data/kidsM12_only_tsne2d.rds")
 
 tsne_df_3d_kid_T8 <- parsed_kid_T8 %>%
@@ -1619,7 +1621,7 @@ tsne_df_3d_kid_T8 <- parsed_kid_T8 %>%
     tSNE2 = ts3_kid_T8$Y[, 2],
     tSNE3 = ts3_kid_T8$Y[, 3]
   ) %>%
-  left_join(select(meta_kids, -dyade), by = "subject_id")
+  left_join(meta_kids, by = "subject_id")
 saveRDS(tsne_df_3d_kid_T8, "results/tsne/data/kidsM12_only_tsne3d.rds")
 
 # T8 kids with metadata already joined:

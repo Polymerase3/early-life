@@ -9,7 +9,7 @@ library(purrr)
 library(locfdr)
 library(RColorBrewer)
 library(stringr)
-source('R/99-utils.R')
+source('R/25-utils.R')
 library(magrittr)
 
 set.seed(632961)
@@ -1123,7 +1123,7 @@ withr::with_preserve_seed({
 ps1 %<>% filter(GROUP == "Healthy controls")
 
 # those are old phiper utils i used earlier
-source("R/99-utils.R")
+source("R/25-utils.R")
 
 stab_df2 <- compute_repertoire_stability(
   x = ps1, group_col = NULL, time_col = "timepoint",

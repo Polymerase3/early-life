@@ -1,7 +1,9 @@
 ################################################################################
 ########################### RICHNESS PLOT FIGURE 1 #############################
 ################################################################################
-source("R/99-utils.R")
+source("R/25-utils.R")
+library(phiper)
+library(phiperio)
 
 # create PHIP data object from input data with reproducible seed
 withr::with_preserve_seed({
@@ -578,3 +580,22 @@ ggsave("results/stab-rich_plots/stability_natmed_legend.png",
 ###############################################################################
 ############################ BETA DIVERSITY TO SHARE ###########################
 ################################################################################
+library(lme4)
+library(emmeans)
+library(dplyr)
+library(readxl)
+
+# filter to peptide_id rank (same level as in plot)
+df_pep <- alpha_df$`big_group * timepoint_recoded` %>%
+  filter(rank == "peptide_id")
+
+# fit LMM: group × timepoint interaction, subject as random effect
+fit <- lmer(
+  richness ~ phip_interaction + (1 | subject_id),
+  data = df_pep
+)
+
+# all pairwise comparisons of big_group × timepoint_recoded cells
+em <- emmeans(fit, ~ phip_interaction)
+x <- pairs(em, adjust = "BH")  # or "bonferroni", "fdr", etc.
+write.xlsx(x, "results/alpha_mixed_model.xlsx")

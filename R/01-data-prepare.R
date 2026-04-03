@@ -718,7 +718,7 @@ core_cols <- c(
 )
 
 # define list of comparisons and longitudinal flags
-source("R/zzz.R")
+source("R/26-zzz.R")
 
 cov_suffix_to_col <- c(
   siblings = "siblings_yes",
@@ -1019,4 +1019,19 @@ rm(list = c(
 ))
 
 gc()
+gc()
+
+## ------------------- SAMPLE-LEVEL METADATA EXPORT ---------------------------
+# Extract one row per sample_id (collapsing across peptides) and save as CSV.
+# The final table contains core_cols + derived boolean label columns; the raw
+# binary metadata dummies were used only inside the label SQL expressions and
+# are not present as standalone columns.
+sample_meta <- ps_merged_meta_bin$data_long %>%
+  dplyr::select(-peptide_id, -exist, -fold_change) %>%
+  dplyr::distinct() %>%
+  dplyr::collect()
+
+readr::write_csv(sample_meta, file = "data/sample_metadata.csv")
+
+rm("sample_meta")
 gc()
